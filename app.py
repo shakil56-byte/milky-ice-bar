@@ -24,223 +24,214 @@ input[type="number"], input[type="text"] { background: #1a2f45 !important; color
 input[type="date"] { background: #1a2f45 !important; color: #e0f0ea !important; border: 1px solid #2a4a65 !important; border-radius: 6px !important; }
 hr { border-color: #1e3a52 !important; }
 p, label, .stText { color: #c8e6dc !important; }
-thead tr th { background: #112236 !important; color: #00e5b0 !important; font-weight: 700; text-align: center !important; }
-tbody tr:nth-child(even) { background: #112236 !important; }
-tbody tr:nth-child(odd) { background: #0d1b2a !important; }
-tbody tr td { color: #e0f0ea !important; text-align: center !important; }
-.stDataFrame { border: 1px solid #1e3a52; border-radius: 10px; }
 div[data-testid="stForm"] { background: #112236; border: 1px solid #1e3a52; border-radius: 10px; padding: 16px; }
+
+/* Excel-style table */
+.excel-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.excel-table th {
+    background: #0a2540;
+    color: #00e5b0;
+    font-weight: 700;
+    text-align: center;
+    padding: 8px 6px;
+    border: 1px solid #1e3a52;
+    white-space: nowrap;
+}
+.excel-table th.col-product { text-align: left; min-width: 120px; }
+.excel-table td {
+    border: 1px solid #1e3a52;
+    padding: 4px 4px;
+    text-align: center;
+    background: #112236;
+    color: #e0f0ea;
+}
+.excel-table tr:nth-child(odd) td { background: #0d1b2a; }
+.excel-table td.col-product {
+    text-align: left;
+    font-weight: 600;
+    color: #e0f0ea;
+    padding-left: 10px;
+    white-space: nowrap;
+}
+.excel-table td.closing-pos { color: #00e5b0; font-weight: 700; font-size: 1rem; }
+.excel-table td.closing-neg { color: #e05c5c; font-weight: 700; font-size: 1rem; }
+.group-header th {
+    background: #0a3050;
+    color: #7ecfb8;
+    font-size: 0.75rem;
+    padding: 4px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ── DB ──────────────────────────────────────────────────────────────────────
+# ── DB ───────────────────────────────────────────────────────────────────────
 DB = "icecream_stock.db"
 
-def conn():
+def get_conn():
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
-    c = conn()
+    c = get_conn()
     c.execute("""CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS agents (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
     c.execute("""CREATE TABLE IF NOT EXISTS stock (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entry_date TEXT NOT NULL, product_id INTEGER NOT NULL,
         opening INTEGER DEFAULT 0, stock_in INTEGER DEFAULT 0,
+        delivery INTEGER DEFAULT 0, returned INTEGER DEFAULT 0,
         retail INTEGER DEFAULT 0, damaged INTEGER DEFAULT 0,
         closing INTEGER DEFAULT 0,
         UNIQUE(entry_date, product_id),
         FOREIGN KEY(product_id) REFERENCES products(id))""")
-    c.execute("""CREATE TABLE IF NOT EXISTS deliveries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entry_date TEXT NOT NULL, product_id INTEGER NOT NULL, agent_id INTEGER NOT NULL,
-        delivered INTEGER DEFAULT 0, returned INTEGER DEFAULT 0,
-        UNIQUE(entry_date, product_id, agent_id),
-        FOREIGN KEY(product_id) REFERENCES products(id),
-        FOREIGN KEY(agent_id) REFERENCES agents(id))""")
-    c.commit()
-    c.close()
+    c.commit(); c.close()
 
 init_db()
 
 def get_products():
-    c = conn(); r = c.execute("SELECT id,name FROM products ORDER BY name").fetchall(); c.close(); return r
-
-def get_agents():
-    c = conn(); r = c.execute("SELECT id,name FROM agents ORDER BY name").fetchall(); c.close(); return r
+    c = get_conn(); r = c.execute("SELECT id,name FROM products ORDER BY name").fetchall(); c.close(); return r
 
 def add_product(name):
-    c = conn()
+    c = get_conn()
     try: c.execute("INSERT INTO products(name) VALUES(?)",(name,)); c.commit(); return True
     except: return False
     finally: c.close()
 
 def del_product(pid):
-    c = conn()
-    c.execute("DELETE FROM deliveries WHERE product_id=?",(pid,))
+    c = get_conn()
     c.execute("DELETE FROM stock WHERE product_id=?",(pid,))
     c.execute("DELETE FROM products WHERE id=?",(pid,))
     c.commit(); c.close()
 
-def add_agent(name):
-    c = conn()
-    try: c.execute("INSERT INTO agents(name) VALUES(?)",(name,)); c.commit(); return True
-    except: return False
-    finally: c.close()
-
-def del_agent(aid):
-    c = conn()
-    c.execute("DELETE FROM deliveries WHERE agent_id=?",(aid,))
-    c.execute("DELETE FROM agents WHERE id=?",(aid,))
-    c.commit(); c.close()
-
 def get_last_closing(pid, before_date):
-    c = conn()
+    c = get_conn()
     r = c.execute("SELECT closing FROM stock WHERE product_id=? AND entry_date<? ORDER BY entry_date DESC LIMIT 1",(pid,before_date)).fetchone()
     c.close(); return r[0] if r else 0
 
-def get_stock_row(entry_date, pid):
-    c = conn()
-    r = c.execute("SELECT opening,stock_in,retail,damaged,closing FROM stock WHERE entry_date=? AND product_id=?",(entry_date,pid)).fetchone()
+def get_row(entry_date, pid):
+    c = get_conn()
+    r = c.execute("SELECT opening,stock_in,delivery,returned,retail,damaged,closing FROM stock WHERE entry_date=? AND product_id=?",(entry_date,pid)).fetchone()
     c.close(); return r
 
-def get_delivery_row(entry_date, pid, aid):
-    c = conn()
-    r = c.execute("SELECT delivered,returned FROM deliveries WHERE entry_date=? AND product_id=? AND agent_id=?",(entry_date,pid,aid)).fetchone()
-    c.close(); return r
-
-def save_stock(entry_date, pid, opening, stock_in, retail, damaged, closing):
-    c = conn()
-    c.execute("""INSERT INTO stock(entry_date,product_id,opening,stock_in,retail,damaged,closing)
-        VALUES(?,?,?,?,?,?,?) ON CONFLICT(entry_date,product_id) DO UPDATE SET
-        opening=excluded.opening,stock_in=excluded.stock_in,retail=excluded.retail,
-        damaged=excluded.damaged,closing=excluded.closing""",
-        (entry_date,pid,opening,stock_in,retail,damaged,closing))
+def save_row(entry_date, pid, opening, stock_in, delivery, returned, retail, damaged):
+    closing = opening + stock_in + returned - delivery - retail - damaged
+    c = get_conn()
+    c.execute("""INSERT INTO stock(entry_date,product_id,opening,stock_in,delivery,returned,retail,damaged,closing)
+        VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(entry_date,product_id) DO UPDATE SET
+        opening=excluded.opening, stock_in=excluded.stock_in,
+        delivery=excluded.delivery, returned=excluded.returned,
+        retail=excluded.retail, damaged=excluded.damaged, closing=excluded.closing""",
+        (entry_date,pid,opening,stock_in,delivery,returned,retail,damaged,closing))
     c.commit(); c.close()
-
-def save_delivery(entry_date, pid, aid, delivered, returned):
-    c = conn()
-    c.execute("""INSERT INTO deliveries(entry_date,product_id,agent_id,delivered,returned)
-        VALUES(?,?,?,?,?) ON CONFLICT(entry_date,product_id,agent_id) DO UPDATE SET
-        delivered=excluded.delivered,returned=excluded.returned""",
-        (entry_date,pid,aid,delivered,returned))
-    c.commit(); c.close()
+    return closing
 
 def get_report(f, t):
-    c = conn()
-    agents = get_agents()
-    products = get_products()
-    rows = []
-    for ed in pd.date_range(f, t):
-        edate = str(ed.date())
-        for pid, pname in products:
-            sr = get_stock_row(edate, pid)
-            if not sr: continue
-            opening,stock_in,retail,damaged,closing = sr
-            total_del = total_ret = 0
-            agent_cols = {}
-            for aid, aname in agents:
-                dr = get_delivery_row(edate, pid, aid)
-                d,r = (dr[0],dr[1]) if dr else (0,0)
-                agent_cols[f"{aname}_ডেলি"] = d
-                agent_cols[f"{aname}_রিটার্ন"] = r
-                total_del += d; total_ret += r
-            row = {"তারিখ":edate,"পণ্য":pname,"ওপেনিং":opening,"স্টক ইন":stock_in}
-            row.update(agent_cols)
-            row.update({"মোট ডেলিভারি":total_del,"মোট রিটার্ন":total_ret,
-                        "খুচরা":retail,"নষ্ট":damaged,"ক্লোজিং":closing})
-            rows.append(row)
+    c = get_conn()
+    rows = c.execute("""
+        SELECT s.entry_date, p.name, s.opening, s.stock_in,
+               s.delivery, s.returned, s.retail, s.damaged, s.closing
+        FROM stock s JOIN products p ON s.product_id=p.id
+        WHERE s.entry_date BETWEEN ? AND ?
+        ORDER BY s.entry_date, p.name
+    """, (f, t)).fetchall()
     c.close()
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+    return rows
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 st.sidebar.markdown("## 🍦 মিল্কি আইস বার")
 st.sidebar.markdown("---")
-page = st.sidebar.radio("মেনু", ["📦 দৈনিক এন্ট্রি","📊 রিপোর্ট","🚴 ডেলিভারিম্যান","🛒 পণ্য তালিকা"], label_visibility="collapsed")
+page = st.sidebar.radio("মেনু", ["📦 দৈনিক এন্ট্রি","📊 রিপোর্ট","🛒 পণ্য তালিকা"], label_visibility="collapsed")
 st.sidebar.markdown("---")
-st.sidebar.markdown("<small style='color:#4a7a6a'>ক্লোজিং = ওপেনিং + স্টক ইন + মোট রিটার্ন − মোট ডেলিভারি − খুচরা − নষ্ট</small>", unsafe_allow_html=True)
+st.sidebar.markdown("<small style='color:#4a7a6a'>ক্লোজিং = ওপেনিং + স্টক ইন + রিটার্ন − ডেলিভারি − খুচরা − নষ্ট</small>", unsafe_allow_html=True)
 
 # ══ PAGE 1: দৈনিক এন্ট্রি ════════════════════════════════════════════════════
 if page == "📦 দৈনিক এন্ট্রি":
     st.title("📦 দৈনিক স্টক এন্ট্রি")
-    col1, _ = st.columns([2,5])
+
+    col1, _ = st.columns([2, 5])
     with col1:
         sel_date = st.date_input("তারিখ", value=date.today())
     edate = str(sel_date)
 
     products = get_products()
-    agents   = get_agents()
-
     if not products:
         st.warning("⚠️ আগে **🛒 পণ্য তালিকা** পেজে গিয়ে পণ্য যোগ করুন।")
         st.stop()
-    if not agents:
-        st.warning("⚠️ আগে **🚴 ডেলিভারিম্যান** পেজে গিয়ে ডেলিভারিম্যান যোগ করুন।")
-        st.stop()
 
-    # Build table header
-    agent_headers = []
-    for _, aname in agents:
-        agent_headers += [f"{aname} ডেলিভারি", f"{aname} রিটার্ন"]
+    # ── Excel-style HTML table header ────────────────────────────────────────
+    st.markdown(f"""
+    <table class="excel-table">
+      <thead>
+        <tr>
+          <th class="col-product" rowspan="2">পণ্য</th>
+          <th rowspan="2">ওপেনিং<br>স্টক</th>
+          <th rowspan="2">স্টক ইন</th>
+          <th rowspan="2">ডেলিভারি</th>
+          <th rowspan="2">রিটার্ন</th>
+          <th rowspan="2">খুচরা</th>
+          <th rowspan="2">নষ্ট</th>
+          <th rowspan="2">ক্লোজিং<br>স্টক</th>
+        </tr>
+      </thead>
+    </table>
+    """, unsafe_allow_html=True)
 
-    all_headers = ["পণ্য","ওপেনিং","স্টক ইন"] + agent_headers + ["খুচরা","নষ্ট","ক্লোজিং"]
-    col_widths = [2] + [1]*(len(all_headers)-1)
+    # ── Input rows ────────────────────────────────────────────────────────────
+    # col widths: পণ্য, ওপেনিং, স্টক ইন, ডেলিভারি, রিটার্ন, খুচরা, নষ্ট, ক্লোজিং
+    W = [2.2, 1, 1, 1, 1, 1, 1, 1.2]
+    headers = ["পণ্য","ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"]
 
-    # Header row
-    hcols = st.columns(col_widths)
-    for i, h in enumerate(all_headers):
-        hcols[i].markdown(f"<p style='color:#00e5b0;font-weight:700;font-size:0.8rem;margin:0;text-align:center'>{h}</p>", unsafe_allow_html=True)
-    st.markdown("<hr style='margin:4px 0'>", unsafe_allow_html=True)
+    # Header row via columns
+    hc = st.columns(W)
+    for i, h in enumerate(headers):
+        hc[i].markdown(
+            f"<div style='background:#0a2540;color:#00e5b0;font-weight:700;"
+            f"font-size:0.8rem;text-align:center;padding:6px 2px;"
+            f"border:1px solid #1e3a52;border-radius:4px;'>{h}</div>",
+            unsafe_allow_html=True)
 
-    # Data rows
     entry_data = {}
-    for pid, pname in products:
-        sr = get_stock_row(edate, pid)
-        last_close = get_last_closing(pid, edate)
-        op  = sr[0] if sr else last_close
-        si  = sr[1] if sr else 0
-        ret = sr[2] if sr else 0
-        dam = sr[3] if sr else 0
 
-        rcols = st.columns(col_widths)
-        rcols[0].markdown(f"<p style='color:#e0f0ea;font-weight:600;padding-top:8px;font-size:0.9rem'>{pname}</p>", unsafe_allow_html=True)
-        opening  = rcols[1].number_input("", value=op,  min_value=0, key=f"op_{pid}", label_visibility="collapsed")
-        stock_in = rcols[2].number_input("", value=si,  min_value=0, key=f"si_{pid}", label_visibility="collapsed")
+    for idx, (pid, pname) in enumerate(products):
+        r = get_row(edate, pid)
+        lc = get_last_closing(pid, edate)
+        op  = r[0] if r else lc
+        si  = r[1] if r else 0
+        de  = r[2] if r else 0
+        re_ = r[3] if r else 0
+        rt  = r[4] if r else 0
+        da  = r[5] if r else 0
 
-        agent_vals = {}
-        ci = 3
-        for aid, aname in agents:
-            dr = get_delivery_row(edate, pid, aid)
-            d_val = dr[0] if dr else 0
-            r_val = dr[1] if dr else 0
-            d = rcols[ci].number_input("", value=d_val, min_value=0, key=f"d_{pid}_{aid}", label_visibility="collapsed")
-            r = rcols[ci+1].number_input("", value=r_val, min_value=0, key=f"r_{pid}_{aid}", label_visibility="collapsed")
-            agent_vals[aid] = (d, r)
-            ci += 2
+        bg = "#112236" if idx % 2 == 0 else "#0d1b2a"
+        rc = st.columns(W)
 
-        retail  = rcols[ci].number_input("",   value=ret, min_value=0, key=f"rt_{pid}", label_visibility="collapsed")
-        damaged = rcols[ci+1].number_input("", value=dam, min_value=0, key=f"da_{pid}", label_visibility="collapsed")
+        rc[0].markdown(
+            f"<div style='background:{bg};color:#e0f0ea;font-weight:600;"
+            f"padding:8px 8px;border:1px solid #1e3a52;border-radius:4px;"
+            f"font-size:0.9rem;white-space:nowrap;overflow:hidden;'>{pname}</div>",
+            unsafe_allow_html=True)
 
-        total_del = sum(v[0] for v in agent_vals.values())
-        total_ret = sum(v[1] for v in agent_vals.values())
-        closing = opening + stock_in + total_ret - total_del - retail - damaged
-        color = "#00e5b0" if closing >= 0 else "#e05c5c"
-        rcols[ci+2].markdown(f"<p style='color:{color};font-weight:700;font-size:1.1rem;text-align:center;padding-top:8px'>{closing}</p>", unsafe_allow_html=True)
+        opening  = rc[1].number_input("", value=op,  min_value=0, key=f"op_{pid}", label_visibility="collapsed")
+        stock_in = rc[2].number_input("", value=si,  min_value=0, key=f"si_{pid}", label_visibility="collapsed")
+        delivery = rc[3].number_input("", value=de,  min_value=0, key=f"de_{pid}", label_visibility="collapsed")
+        returned = rc[4].number_input("", value=re_, min_value=0, key=f"re_{pid}", label_visibility="collapsed")
+        retail   = rc[5].number_input("", value=rt,  min_value=0, key=f"rt_{pid}", label_visibility="collapsed")
+        damaged  = rc[6].number_input("", value=da,  min_value=0, key=f"da_{pid}", label_visibility="collapsed")
 
-        entry_data[pid] = {
-            "opening":opening,"stock_in":stock_in,"retail":retail,
-            "damaged":damaged,"closing":closing,"agents":agent_vals
-        }
-        st.markdown("<hr style='margin:2px 0;border-color:#1e3a52'>", unsafe_allow_html=True)
+        closing = opening + stock_in + returned - delivery - retail - damaged
+        cl_color = "#00e5b0" if closing >= 0 else "#e05c5c"
+        rc[7].markdown(
+            f"<div style='background:{bg};color:{cl_color};font-weight:700;"
+            f"font-size:1.05rem;text-align:center;padding:8px 4px;"
+            f"border:1px solid #1e3a52;border-radius:4px;'>{closing}</div>",
+            unsafe_allow_html=True)
+
+        entry_data[pid] = (opening, stock_in, delivery, returned, retail, damaged)
 
     st.markdown("")
-    if st.button("💾  সব সেভ করুন", use_container_width=False):
-        for pid, v in entry_data.items():
-            save_stock(edate, pid, v["opening"], v["stock_in"], v["retail"], v["damaged"], v["closing"])
-            for aid, (d, r) in v["agents"].items():
-                save_delivery(edate, pid, aid, d, r)
+    if st.button("💾  সব সেভ করুন"):
+        for pid, (op, si, de, re_, rt, da) in entry_data.items():
+            save_row(edate, pid, op, si, de, re_, rt, da)
         st.success(f"✅ {edate} তারিখের ডেটা সেভ হয়েছে!")
         st.balloons()
 
@@ -252,51 +243,45 @@ elif page == "📊 রিপোর্ট":
     with c2: td = st.date_input("শেষ",  value=date.today())
     with c3:
         st.markdown("<br>", unsafe_allow_html=True)
-        show = st.button("🔍 দেখুন", use_container_width=True)
+        st.button("🔍 দেখুন", use_container_width=True)
 
-    df = get_report(str(fd), str(td))
-    if df.empty:
+    rows = get_report(str(fd), str(td))
+    if not rows:
         st.info("এই সময়ের কোনো ডেটা নেই।")
     else:
+        df = pd.DataFrame(rows, columns=["তারিখ","পণ্য","ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
+
         m1,m2,m3,m4,m5 = st.columns(5)
-        m1.metric("মোট স্টক ইন",    int(df["স্টক ইন"].sum()) if "স্টক ইন" in df else 0)
-        m2.metric("মোট ডেলিভারি",   int(df["মোট ডেলিভারি"].sum()) if "মোট ডেলিভারি" in df else 0)
-        m3.metric("মোট রিটার্ন",    int(df["মোট রিটার্ন"].sum()) if "মোট রিটার্ন" in df else 0)
-        m4.metric("মোট খুচরা",      int(df["খুচরা"].sum()) if "খুচরা" in df else 0)
-        m5.metric("মোট নষ্ট",       int(df["নষ্ট"].sum()) if "নষ্ট" in df else 0)
+        m1.metric("মোট স্টক ইন",  int(df["স্টক ইন"].sum()))
+        m2.metric("মোট ডেলিভারি", int(df["ডেলিভারি"].sum()))
+        m3.metric("মোট রিটার্ন",  int(df["রিটার্ন"].sum()))
+        m4.metric("মোট খুচরা",    int(df["খুচরা"].sum()))
+        m5.metric("মোট নষ্ট",     int(df["নষ্ট"].sum()))
+
         st.markdown("---")
         st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # Product summary
+        st.markdown("### পণ্য ভিত্তিক সারসংক্ষেপ")
+        summary = df.groupby("পণ্য").agg(
+            স্টক_ইন=("স্টক ইন","sum"),
+            ডেলিভারি=("ডেলিভারি","sum"),
+            রিটার্ন=("রিটার্ন","sum"),
+            খুচরা=("খুচরা","sum"),
+            নষ্ট=("নষ্ট","sum"),
+            শেষ_ক্লোজিং=("ক্লোজিং","last")
+        ).reset_index()
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+
         csv = df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ CSV ডাউনলোড", data=csv,
+        st.download_button("⬇️ Excel CSV ডাউনলোড", data=csv,
             file_name=f"report_{fd}_{td}.csv", mime="text/csv")
 
-# ══ PAGE 3: ডেলিভারিম্যান ════════════════════════════════════════════════════
-elif page == "🚴 ডেলিভারিম্যান":
-    st.title("🚴 ডেলিভারিম্যান তালিকা")
-    with st.form("agent_form", clear_on_submit=True):
-        c1,c2 = st.columns([4,1])
-        new_agent = c1.text_input("নতুন ডেলিভারিম্যানের নাম", placeholder="যেমন: সাজ্জাদ")
-        if c2.form_submit_button("+ যোগ", use_container_width=True):
-            if new_agent.strip():
-                if add_agent(new_agent.strip()): st.rerun()
-                else: st.error("এই নাম আগেই আছে!")
-            else: st.warning("নাম লিখুন।")
-    st.markdown("---")
-    agents = get_agents()
-    if not agents:
-        st.info("এখনো কেউ নেই। উপরে যোগ করুন।")
-    else:
-        for aid, aname in agents:
-            c1,c2 = st.columns([6,1])
-            c1.markdown(f"<p style='padding-top:6px;color:#e0f0ea;font-size:1rem'>🚴 {aname}</p>", unsafe_allow_html=True)
-            if c2.button("🗑", key=f"da_{aid}"):
-                del_agent(aid); st.rerun()
-
-# ══ PAGE 4: পণ্য তালিকা ══════════════════════════════════════════════════════
+# ══ PAGE 3: পণ্য তালিকা ══════════════════════════════════════════════════════
 elif page == "🛒 পণ্য তালিকা":
     st.title("🛒 পণ্য তালিকা")
     with st.form("prod_form", clear_on_submit=True):
-        c1,c2 = st.columns([4,1])
+        c1, c2 = st.columns([4,1])
         new_prod = c1.text_input("নতুন পণ্যের নাম", placeholder="যেমন: চকোলেট কাপ")
         if c2.form_submit_button("+ যোগ", use_container_width=True):
             if new_prod.strip():
@@ -310,7 +295,7 @@ elif page == "🛒 পণ্য তালিকা":
     else:
         st.markdown(f"**মোট পণ্য: {len(products)}টি**")
         for pid, pname in products:
-            c1,c2 = st.columns([6,1])
+            c1, c2 = st.columns([6,1])
             c1.markdown(f"<p style='padding-top:6px;color:#e0f0ea;font-size:1rem'>🍦 {pname}</p>", unsafe_allow_html=True)
             if c2.button("🗑", key=f"dp_{pid}"):
                 del_product(pid); st.rerun()
