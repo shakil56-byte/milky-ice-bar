@@ -2,382 +2,315 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import date, timedelta
-import os
 
-# ── Page config ────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="🍦 আইসক্রিম স্টক",
-    page_icon="🍦",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="🍦 মিল্কি আইস বার", page_icon="🍦", layout="wide")
 
-# ── Custom CSS ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&family=Tiro+Bangla&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Hind Siliguri', sans-serif;
-}
-
-/* Dark background */
+@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;600;700&display=swap');
+html, body, [class*="css"] { font-family: 'Hind Siliguri', sans-serif; }
 .stApp { background: #0d1b2a; }
-
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background: #112236 !important;
-    border-right: 1px solid #1e3a52;
-}
+[data-testid="stSidebar"] { background: #112236 !important; border-right: 1px solid #1e3a52; }
 [data-testid="stSidebar"] * { color: #a8d5c2 !important; }
-
-/* Main headings */
-h1 { color: #00e5b0 !important; font-size: 2rem !important; }
-h2 { color: #00e5b0 !important; }
-h3 { color: #7ecfb8 !important; }
-
-/* Metric cards */
-[data-testid="metric-container"] {
-    background: #112236;
-    border: 1px solid #1e3a52;
-    border-radius: 12px;
-    padding: 12px 18px;
-}
-[data-testid="metric-container"] label { color: #7ecfb8 !important; font-size: 0.82rem !important; }
-[data-testid="metric-container"] [data-testid="stMetricValue"] {
-    color: #00e5b0 !important;
-    font-size: 1.6rem !important;
-    font-weight: 700 !important;
-}
-
-/* Number inputs */
-input[type="number"] {
-    background: #1a2f45 !important;
-    color: #e0f0ea !important;
-    border: 1px solid #2a4a65 !important;
-    border-radius: 8px !important;
-}
-
-/* Tables */
-[data-testid="stDataFrame"] {
-    border: 1px solid #1e3a52;
-    border-radius: 10px;
-    overflow: hidden;
-}
-
-/* Buttons */
-.stButton button {
-    background: #00e5b0 !important;
-    color: #0d1b2a !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 700 !important;
-    font-family: 'Hind Siliguri', sans-serif !important;
-    padding: 0.4rem 1.4rem !important;
-    transition: all 0.2s;
-}
-.stButton button:hover { opacity: 0.85; transform: translateY(-1px); }
-
-/* Delete button */
-.del-btn button {
-    background: #e05c5c !important;
-    color: white !important;
-}
-
-/* Success / error */
-.stSuccess { background: #0d2e22 !important; border-left: 4px solid #00e5b0 !important; }
-.stError   { background: #2e0d0d !important; border-left: 4px solid #e05c5c !important; }
-
-/* Selectbox */
-[data-baseweb="select"] > div {
-    background: #1a2f45 !important;
-    border-color: #2a4a65 !important;
-    color: #e0f0ea !important;
-}
-
-/* Date input */
-input[type="date"] {
-    background: #1a2f45 !important;
-    color: #e0f0ea !important;
-    border: 1px solid #2a4a65 !important;
-    border-radius: 8px !important;
-}
-
-/* Divider */
+h1 { color: #00e5b0 !important; }
+h2, h3 { color: #7ecfb8 !important; }
+[data-testid="metric-container"] { background: #112236; border: 1px solid #1e3a52; border-radius: 10px; padding: 10px 16px; }
+[data-testid="metric-container"] label { color: #7ecfb8 !important; font-size: 0.8rem !important; }
+[data-testid="metric-container"] [data-testid="stMetricValue"] { color: #00e5b0 !important; font-weight: 700 !important; }
+input[type="number"], input[type="text"] { background: #1a2f45 !important; color: #e0f0ea !important; border: 1px solid #2a4a65 !important; border-radius: 6px !important; }
+.stButton button { background: #00e5b0 !important; color: #0d1b2a !important; border: none !important; border-radius: 8px !important; font-weight: 700 !important; font-family: 'Hind Siliguri', sans-serif !important; }
+.stButton button:hover { opacity: 0.85; }
+[data-baseweb="select"] > div { background: #1a2f45 !important; border-color: #2a4a65 !important; color: #e0f0ea !important; }
+input[type="date"] { background: #1a2f45 !important; color: #e0f0ea !important; border: 1px solid #2a4a65 !important; border-radius: 6px !important; }
 hr { border-color: #1e3a52 !important; }
-
 p, label, .stText { color: #c8e6dc !important; }
+thead tr th { background: #112236 !important; color: #00e5b0 !important; font-weight: 700; text-align: center !important; }
+tbody tr:nth-child(even) { background: #112236 !important; }
+tbody tr:nth-child(odd) { background: #0d1b2a !important; }
+tbody tr td { color: #e0f0ea !important; text-align: center !important; }
+.stDataFrame { border: 1px solid #1e3a52; border-radius: 10px; }
+div[data-testid="stForm"] { background: #112236; border: 1px solid #1e3a52; border-radius: 10px; padding: 16px; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Database ────────────────────────────────────────────────────────────────
+# ── DB ──────────────────────────────────────────────────────────────────────
 DB = "icecream_stock.db"
 
-def get_conn():
+def conn():
     return sqlite3.connect(DB, check_same_thread=False)
 
 def init_db():
-    con = get_conn()
-    con.execute("""CREATE TABLE IF NOT EXISTS products (
+    c = conn()
+    c.execute("""CREATE TABLE IF NOT EXISTS products (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS agents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS stock (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL
-    )""")
-    con.execute("""CREATE TABLE IF NOT EXISTS stock (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entry_date TEXT NOT NULL,
-        product_id INTEGER NOT NULL,
-        opening INTEGER DEFAULT 0,
-        input_qty INTEGER DEFAULT 0,
-        delivery INTEGER DEFAULT 0,
-        returned INTEGER DEFAULT 0,
-        damaged INTEGER DEFAULT 0,
-        retail INTEGER DEFAULT 0,
+        entry_date TEXT NOT NULL, product_id INTEGER NOT NULL,
+        opening INTEGER DEFAULT 0, stock_in INTEGER DEFAULT 0,
+        retail INTEGER DEFAULT 0, damaged INTEGER DEFAULT 0,
         closing INTEGER DEFAULT 0,
         UNIQUE(entry_date, product_id),
-        FOREIGN KEY(product_id) REFERENCES products(id)
-    )""")
-    con.commit()
-    con.close()
+        FOREIGN KEY(product_id) REFERENCES products(id))""")
+    c.execute("""CREATE TABLE IF NOT EXISTS deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_date TEXT NOT NULL, product_id INTEGER NOT NULL, agent_id INTEGER NOT NULL,
+        delivered INTEGER DEFAULT 0, returned INTEGER DEFAULT 0,
+        UNIQUE(entry_date, product_id, agent_id),
+        FOREIGN KEY(product_id) REFERENCES products(id),
+        FOREIGN KEY(agent_id) REFERENCES agents(id))""")
+    c.commit()
+    c.close()
 
 init_db()
 
 def get_products():
-    con = get_conn()
-    rows = con.execute("SELECT id, name FROM products ORDER BY name").fetchall()
-    con.close()
-    return rows
+    c = conn(); r = c.execute("SELECT id,name FROM products ORDER BY name").fetchall(); c.close(); return r
+
+def get_agents():
+    c = conn(); r = c.execute("SELECT id,name FROM agents ORDER BY name").fetchall(); c.close(); return r
 
 def add_product(name):
-    con = get_conn()
-    try:
-        con.execute("INSERT INTO products(name) VALUES(?)", (name.strip(),))
-        con.commit()
-        return True
-    except sqlite3.IntegrityError:
-        return False
-    finally:
-        con.close()
+    c = conn()
+    try: c.execute("INSERT INTO products(name) VALUES(?)",(name,)); c.commit(); return True
+    except: return False
+    finally: c.close()
 
-def delete_product(pid):
-    con = get_conn()
-    con.execute("DELETE FROM stock WHERE product_id=?", (pid,))
-    con.execute("DELETE FROM products WHERE id=?", (pid,))
-    con.commit()
-    con.close()
+def del_product(pid):
+    c = conn()
+    c.execute("DELETE FROM deliveries WHERE product_id=?",(pid,))
+    c.execute("DELETE FROM stock WHERE product_id=?",(pid,))
+    c.execute("DELETE FROM products WHERE id=?",(pid,))
+    c.commit(); c.close()
 
-def get_last_closing(product_id, before_date):
-    con = get_conn()
-    row = con.execute(
-        "SELECT closing FROM stock WHERE product_id=? AND entry_date<? ORDER BY entry_date DESC LIMIT 1",
-        (product_id, before_date)
-    ).fetchone()
-    con.close()
-    return row[0] if row else 0
+def add_agent(name):
+    c = conn()
+    try: c.execute("INSERT INTO agents(name) VALUES(?)",(name,)); c.commit(); return True
+    except: return False
+    finally: c.close()
 
-def get_entry(entry_date, product_id):
-    con = get_conn()
-    row = con.execute(
-        "SELECT opening,input_qty,delivery,returned,damaged,retail,closing FROM stock WHERE entry_date=? AND product_id=?",
-        (entry_date, product_id)
-    ).fetchone()
-    con.close()
-    return row
+def del_agent(aid):
+    c = conn()
+    c.execute("DELETE FROM deliveries WHERE agent_id=?",(aid,))
+    c.execute("DELETE FROM agents WHERE id=?",(aid,))
+    c.commit(); c.close()
 
-def save_entry(entry_date, product_id, opening, input_qty, delivery, returned, damaged, retail):
-    closing = opening + input_qty + returned - delivery - damaged - retail
-    con = get_conn()
-    con.execute("""INSERT INTO stock(entry_date,product_id,opening,input_qty,delivery,returned,damaged,retail,closing)
-        VALUES(?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(entry_date,product_id) DO UPDATE SET
-        opening=excluded.opening, input_qty=excluded.input_qty, delivery=excluded.delivery,
-        returned=excluded.returned, damaged=excluded.damaged, retail=excluded.retail, closing=excluded.closing
-    """, (entry_date, product_id, opening, input_qty, delivery, returned, damaged, retail, closing))
-    con.commit()
-    con.close()
-    return closing
+def get_last_closing(pid, before_date):
+    c = conn()
+    r = c.execute("SELECT closing FROM stock WHERE product_id=? AND entry_date<? ORDER BY entry_date DESC LIMIT 1",(pid,before_date)).fetchone()
+    c.close(); return r[0] if r else 0
 
-def get_report(from_date, to_date):
-    con = get_conn()
-    rows = con.execute("""
-        SELECT s.entry_date, p.name, s.opening, s.input_qty, s.delivery,
-               s.returned, s.damaged, s.retail, s.closing
-        FROM stock s JOIN products p ON s.product_id=p.id
-        WHERE s.entry_date BETWEEN ? AND ?
-        ORDER BY s.entry_date, p.name
-    """, (from_date, to_date)).fetchall()
-    con.close()
-    return rows
+def get_stock_row(entry_date, pid):
+    c = conn()
+    r = c.execute("SELECT opening,stock_in,retail,damaged,closing FROM stock WHERE entry_date=? AND product_id=?",(entry_date,pid)).fetchone()
+    c.close(); return r
 
-# ── Sidebar Navigation ──────────────────────────────────────────────────────
-st.sidebar.markdown("## 🍦 আইসক্রিম স্টক")
+def get_delivery_row(entry_date, pid, aid):
+    c = conn()
+    r = c.execute("SELECT delivered,returned FROM deliveries WHERE entry_date=? AND product_id=? AND agent_id=?",(entry_date,pid,aid)).fetchone()
+    c.close(); return r
+
+def save_stock(entry_date, pid, opening, stock_in, retail, damaged, closing):
+    c = conn()
+    c.execute("""INSERT INTO stock(entry_date,product_id,opening,stock_in,retail,damaged,closing)
+        VALUES(?,?,?,?,?,?,?) ON CONFLICT(entry_date,product_id) DO UPDATE SET
+        opening=excluded.opening,stock_in=excluded.stock_in,retail=excluded.retail,
+        damaged=excluded.damaged,closing=excluded.closing""",
+        (entry_date,pid,opening,stock_in,retail,damaged,closing))
+    c.commit(); c.close()
+
+def save_delivery(entry_date, pid, aid, delivered, returned):
+    c = conn()
+    c.execute("""INSERT INTO deliveries(entry_date,product_id,agent_id,delivered,returned)
+        VALUES(?,?,?,?,?) ON CONFLICT(entry_date,product_id,agent_id) DO UPDATE SET
+        delivered=excluded.delivered,returned=excluded.returned""",
+        (entry_date,pid,aid,delivered,returned))
+    c.commit(); c.close()
+
+def get_report(f, t):
+    c = conn()
+    agents = get_agents()
+    products = get_products()
+    rows = []
+    for ed in pd.date_range(f, t):
+        edate = str(ed.date())
+        for pid, pname in products:
+            sr = get_stock_row(edate, pid)
+            if not sr: continue
+            opening,stock_in,retail,damaged,closing = sr
+            total_del = total_ret = 0
+            agent_cols = {}
+            for aid, aname in agents:
+                dr = get_delivery_row(edate, pid, aid)
+                d,r = (dr[0],dr[1]) if dr else (0,0)
+                agent_cols[f"{aname}_ডেলি"] = d
+                agent_cols[f"{aname}_রিটার্ন"] = r
+                total_del += d; total_ret += r
+            row = {"তারিখ":edate,"পণ্য":pname,"ওপেনিং":opening,"স্টক ইন":stock_in}
+            row.update(agent_cols)
+            row.update({"মোট ডেলিভারি":total_del,"মোট রিটার্ন":total_ret,
+                        "খুচরা":retail,"নষ্ট":damaged,"ক্লোজিং":closing})
+            rows.append(row)
+    c.close()
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+# ── Sidebar ──────────────────────────────────────────────────────────────────
+st.sidebar.markdown("## 🍦 মিল্কি আইস বার")
 st.sidebar.markdown("---")
-page = st.sidebar.radio("মেনু", ["📦 দৈনিক এন্ট্রি", "📊 রিপোর্ট", "🛒 প্রোডাক্ট তালিকা"],
-                         label_visibility="collapsed")
+page = st.sidebar.radio("মেনু", ["📦 দৈনিক এন্ট্রি","📊 রিপোর্ট","🚴 ডেলিভারিম্যান","🛒 পণ্য তালিকা"], label_visibility="collapsed")
 st.sidebar.markdown("---")
-st.sidebar.markdown("<small style='color:#4a7a6a'>ক্লোজিং = ওপেনিং + ইনপুট + রিটার্ন − ডেলিভারি − নষ্ট − খুচরা</small>",
-                    unsafe_allow_html=True)
+st.sidebar.markdown("<small style='color:#4a7a6a'>ক্লোজিং = ওপেনিং + স্টক ইন + মোট রিটার্ন − মোট ডেলিভারি − খুচরা − নষ্ট</small>", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 1 — দৈনিক এন্ট্রি
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ PAGE 1: দৈনিক এন্ট্রি ════════════════════════════════════════════════════
 if page == "📦 দৈনিক এন্ট্রি":
     st.title("📦 দৈনিক স্টক এন্ট্রি")
-
-    col1, col2 = st.columns([2, 5])
+    col1, _ = st.columns([2,5])
     with col1:
-        selected_date = st.date_input("তারিখ", value=date.today(), label_visibility="visible")
+        sel_date = st.date_input("তারিখ", value=date.today())
+    edate = str(sel_date)
 
     products = get_products()
+    agents   = get_agents()
+
     if not products:
-        st.warning("⚠️ আগে **প্রোডাক্ট তালিকা** পেজে গিয়ে প্রোডাক্ট যোগ করুন।")
+        st.warning("⚠️ আগে **🛒 পণ্য তালিকা** পেজে গিয়ে পণ্য যোগ করুন।")
+        st.stop()
+    if not agents:
+        st.warning("⚠️ আগে **🚴 ডেলিভারিম্যান** পেজে গিয়ে ডেলিভারিম্যান যোগ করুন।")
         st.stop()
 
-    st.markdown("---")
+    # Build table header
+    agent_headers = []
+    for _, aname in agents:
+        agent_headers += [f"{aname} ডেলিভারি", f"{aname} রিটার্ন"]
 
-    # Column headers
-    cols = st.columns([3, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.8])
-    headers = ["প্রোডাক্ট", "ওপেনিং", "ইনপুট", "ডেলিভারি", "রিটার্ন", "নষ্ট", "খুচরা", "ক্লোজিং"]
-    for c, h in zip(cols, headers):
-        c.markdown(f"<p style='color:#00e5b0;font-weight:700;font-size:0.85rem;margin-bottom:4px'>{h}</p>",
-                   unsafe_allow_html=True)
+    all_headers = ["পণ্য","ওপেনিং","স্টক ইন"] + agent_headers + ["খুচরা","নষ্ট","ক্লোজিং"]
+    col_widths = [2] + [1]*(len(all_headers)-1)
 
+    # Header row
+    hcols = st.columns(col_widths)
+    for i, h in enumerate(all_headers):
+        hcols[i].markdown(f"<p style='color:#00e5b0;font-weight:700;font-size:0.8rem;margin:0;text-align:center'>{h}</p>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin:4px 0'>", unsafe_allow_html=True)
+
+    # Data rows
     entry_data = {}
-    date_str = str(selected_date)
-
     for pid, pname in products:
-        existing = get_entry(date_str, pid)
-        last_closing = get_last_closing(pid, date_str)
+        sr = get_stock_row(edate, pid)
+        last_close = get_last_closing(pid, edate)
+        op  = sr[0] if sr else last_close
+        si  = sr[1] if sr else 0
+        ret = sr[2] if sr else 0
+        dam = sr[3] if sr else 0
 
-        if existing:
-            def_opening  = existing[0]
-            def_input    = existing[1]
-            def_delivery = existing[2]
-            def_returned = existing[3]
-            def_damaged  = existing[4]
-            def_retail   = existing[5]
-        else:
-            def_opening  = last_closing
-            def_input = def_delivery = def_returned = def_damaged = def_retail = 0
+        rcols = st.columns(col_widths)
+        rcols[0].markdown(f"<p style='color:#e0f0ea;font-weight:600;padding-top:8px;font-size:0.9rem'>{pname}</p>", unsafe_allow_html=True)
+        opening  = rcols[1].number_input("", value=op,  min_value=0, key=f"op_{pid}", label_visibility="collapsed")
+        stock_in = rcols[2].number_input("", value=si,  min_value=0, key=f"si_{pid}", label_visibility="collapsed")
 
-        cols = st.columns([3, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.8])
-        cols[0].markdown(f"<p style='padding-top:8px;color:#e0f0ea;font-weight:600'>{pname}</p>",
-                         unsafe_allow_html=True)
+        agent_vals = {}
+        ci = 3
+        for aid, aname in agents:
+            dr = get_delivery_row(edate, pid, aid)
+            d_val = dr[0] if dr else 0
+            r_val = dr[1] if dr else 0
+            d = rcols[ci].number_input("", value=d_val, min_value=0, key=f"d_{pid}_{aid}", label_visibility="collapsed")
+            r = rcols[ci+1].number_input("", value=r_val, min_value=0, key=f"r_{pid}_{aid}", label_visibility="collapsed")
+            agent_vals[aid] = (d, r)
+            ci += 2
 
-        opening  = cols[1].number_input("ওপেনিং",  value=def_opening,  min_value=0, key=f"op_{pid}",  label_visibility="collapsed")
-        input_   = cols[2].number_input("ইনপুট",   value=def_input,    min_value=0, key=f"in_{pid}",  label_visibility="collapsed")
-        delivery = cols[3].number_input("ডেলিভারি",value=def_delivery, min_value=0, key=f"de_{pid}",  label_visibility="collapsed")
-        returned = cols[4].number_input("রিটার্ন",  value=def_returned, min_value=0, key=f"re_{pid}",  label_visibility="collapsed")
-        damaged  = cols[5].number_input("নষ্ট",    value=def_damaged,  min_value=0, key=f"da_{pid}",  label_visibility="collapsed")
-        retail   = cols[6].number_input("খুচরা",   value=def_retail,   min_value=0, key=f"rt_{pid}",  label_visibility="collapsed")
+        retail  = rcols[ci].number_input("",   value=ret, min_value=0, key=f"rt_{pid}", label_visibility="collapsed")
+        damaged = rcols[ci+1].number_input("", value=dam, min_value=0, key=f"da_{pid}", label_visibility="collapsed")
 
-        closing = opening + input_ + returned - delivery - damaged - retail
+        total_del = sum(v[0] for v in agent_vals.values())
+        total_ret = sum(v[1] for v in agent_vals.values())
+        closing = opening + stock_in + total_ret - total_del - retail - damaged
         color = "#00e5b0" if closing >= 0 else "#e05c5c"
-        cols[7].markdown(f"<p style='padding-top:8px;font-size:1.2rem;font-weight:700;color:{color}'>{closing}</p>",
-                         unsafe_allow_html=True)
+        rcols[ci+2].markdown(f"<p style='color:{color};font-weight:700;font-size:1.1rem;text-align:center;padding-top:8px'>{closing}</p>", unsafe_allow_html=True)
 
-        entry_data[pid] = (opening, input_, delivery, returned, damaged, retail)
+        entry_data[pid] = {
+            "opening":opening,"stock_in":stock_in,"retail":retail,
+            "damaged":damaged,"closing":closing,"agents":agent_vals
+        }
+        st.markdown("<hr style='margin:2px 0;border-color:#1e3a52'>", unsafe_allow_html=True)
 
-    st.markdown("---")
+    st.markdown("")
     if st.button("💾  সব সেভ করুন", use_container_width=False):
-        for pid, (opening, input_, delivery, returned, damaged, retail) in entry_data.items():
-            save_entry(date_str, pid, opening, input_, delivery, returned, damaged, retail)
-        st.success(f"✅ {date_str} তারিখের ডেটা সেভ হয়েছে!")
+        for pid, v in entry_data.items():
+            save_stock(edate, pid, v["opening"], v["stock_in"], v["retail"], v["damaged"], v["closing"])
+            for aid, (d, r) in v["agents"].items():
+                save_delivery(edate, pid, aid, d, r)
+        st.success(f"✅ {edate} তারিখের ডেটা সেভ হয়েছে!")
         st.balloons()
 
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 2 — রিপোর্ট
-# ══════════════════════════════════════════════════════════════════════════════
+# ══ PAGE 2: রিপোর্ট ══════════════════════════════════════════════════════════
 elif page == "📊 রিপোর্ট":
     st.title("📊 স্টক রিপোর্ট")
-
-    c1, c2, c3 = st.columns([2, 2, 2])
-    with c1:
-        from_date = st.date_input("শুরুর তারিখ", value=date.today() - timedelta(days=6))
-    with c2:
-        to_date = st.date_input("শেষ তারিখ", value=date.today())
+    c1, c2, c3 = st.columns([2,2,2])
+    with c1: fd = st.date_input("শুরু", value=date.today()-timedelta(days=6))
+    with c2: td = st.date_input("শেষ",  value=date.today())
     with c3:
         st.markdown("<br>", unsafe_allow_html=True)
-        show = st.button("🔍 রিপোর্ট দেখুন", use_container_width=True)
+        show = st.button("🔍 দেখুন", use_container_width=True)
 
-    if show or True:
-        rows = get_report(str(from_date), str(to_date))
-        if not rows:
-            st.info("এই সময়ের কোনো ডেটা নেই।")
-        else:
-            df = pd.DataFrame(rows, columns=[
-                "তারিখ", "প্রোডাক্ট", "ওপেনিং", "ইনপুট",
-                "ডেলিভারি", "রিটার্ন", "নষ্ট", "খুচরা", "ক্লোজিং"
-            ])
+    df = get_report(str(fd), str(td))
+    if df.empty:
+        st.info("এই সময়ের কোনো ডেটা নেই।")
+    else:
+        m1,m2,m3,m4,m5 = st.columns(5)
+        m1.metric("মোট স্টক ইন",    int(df["স্টক ইন"].sum()) if "স্টক ইন" in df else 0)
+        m2.metric("মোট ডেলিভারি",   int(df["মোট ডেলিভারি"].sum()) if "মোট ডেলিভারি" in df else 0)
+        m3.metric("মোট রিটার্ন",    int(df["মোট রিটার্ন"].sum()) if "মোট রিটার্ন" in df else 0)
+        m4.metric("মোট খুচরা",      int(df["খুচরা"].sum()) if "খুচরা" in df else 0)
+        m5.metric("মোট নষ্ট",       int(df["নষ্ট"].sum()) if "নষ্ট" in df else 0)
+        st.markdown("---")
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        csv = df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("⬇️ CSV ডাউনলোড", data=csv,
+            file_name=f"report_{fd}_{td}.csv", mime="text/csv")
 
-            # Summary metrics
-            st.markdown("### সারসংক্ষেপ")
-            m1, m2, m3, m4, m5, m6 = st.columns(6)
-            m1.metric("মোট ইনপুট",    int(df["ইনপুট"].sum()))
-            m2.metric("মোট ডেলিভারি", int(df["ডেলিভারি"].sum()))
-            m3.metric("মোট রিটার্ন",  int(df["রিটার্ন"].sum()))
-            m4.metric("মোট নষ্ট",     int(df["নষ্ট"].sum()))
-            m5.metric("মোট খুচরা",    int(df["খুচরা"].sum()))
-            m6.metric("শেষ ক্লোজিং",  int(df["ক্লোজিং"].iloc[-1]))
-
-            st.markdown("---")
-            st.markdown("### বিস্তারিত")
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-            # Product-wise summary
-            st.markdown("### প্রোডাক্ট ভিত্তিক সারসংক্ষেপ")
-            summary = df.groupby("প্রোডাক্ট").agg(
-                ইনপুট=("ইনপুট","sum"),
-                ডেলিভারি=("ডেলিভারি","sum"),
-                রিটার্ন=("রিটার্ন","sum"),
-                নষ্ট=("নষ্ট","sum"),
-                খুচরা=("খুচরা","sum"),
-                শেষ_ক্লোজিং=("ক্লোজিং","last")
-            ).reset_index()
-            st.dataframe(summary, use_container_width=True, hide_index=True)
-
-            # CSV Download
-            csv = df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button(
-                "⬇️ Excel-এ ডাউনলোড (CSV)",
-                data=csv,
-                file_name=f"stock_report_{from_date}_{to_date}.csv",
-                mime="text/csv"
-            )
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 3 — প্রোডাক্ট তালিকা
-# ══════════════════════════════════════════════════════════════════════════════
-elif page == "🛒 প্রোডাক্ট তালিকা":
-    st.title("🛒 প্রোডাক্ট তালিকা")
-
-    # Add product
-    with st.form("add_form", clear_on_submit=True):
-        col1, col2 = st.columns([4, 1])
-        new_name = col1.text_input("নতুন প্রোডাক্টের নাম", placeholder="যেমন: চকোলেট কাপ ৫০মিলি")
-        submitted = col2.form_submit_button("+ যোগ করুন", use_container_width=True)
-        if submitted:
-            if new_name.strip():
-                if add_product(new_name):
-                    st.success(f"✅ '{new_name}' যোগ হয়েছে!")
-                    st.rerun()
-                else:
-                    st.error("এই নামে প্রোডাক্ট আগেই আছে!")
-            else:
-                st.warning("প্রোডাক্টের নাম লিখুন।")
-
+# ══ PAGE 3: ডেলিভারিম্যান ════════════════════════════════════════════════════
+elif page == "🚴 ডেলিভারিম্যান":
+    st.title("🚴 ডেলিভারিম্যান তালিকা")
+    with st.form("agent_form", clear_on_submit=True):
+        c1,c2 = st.columns([4,1])
+        new_agent = c1.text_input("নতুন ডেলিভারিম্যানের নাম", placeholder="যেমন: সাজ্জাদ")
+        if c2.form_submit_button("+ যোগ", use_container_width=True):
+            if new_agent.strip():
+                if add_agent(new_agent.strip()): st.rerun()
+                else: st.error("এই নাম আগেই আছে!")
+            else: st.warning("নাম লিখুন।")
     st.markdown("---")
+    agents = get_agents()
+    if not agents:
+        st.info("এখনো কেউ নেই। উপরে যোগ করুন।")
+    else:
+        for aid, aname in agents:
+            c1,c2 = st.columns([6,1])
+            c1.markdown(f"<p style='padding-top:6px;color:#e0f0ea;font-size:1rem'>🚴 {aname}</p>", unsafe_allow_html=True)
+            if c2.button("🗑", key=f"da_{aid}"):
+                del_agent(aid); st.rerun()
 
+# ══ PAGE 4: পণ্য তালিকা ══════════════════════════════════════════════════════
+elif page == "🛒 পণ্য তালিকা":
+    st.title("🛒 পণ্য তালিকা")
+    with st.form("prod_form", clear_on_submit=True):
+        c1,c2 = st.columns([4,1])
+        new_prod = c1.text_input("নতুন পণ্যের নাম", placeholder="যেমন: চকোলেট কাপ")
+        if c2.form_submit_button("+ যোগ", use_container_width=True):
+            if new_prod.strip():
+                if add_product(new_prod.strip()): st.rerun()
+                else: st.error("এই নাম আগেই আছে!")
+            else: st.warning("নাম লিখুন।")
+    st.markdown("---")
     products = get_products()
     if not products:
-        st.info("এখনো কোনো প্রোডাক্ট নেই। উপরে যোগ করুন।")
+        st.info("এখনো কোনো পণ্য নেই। উপরে যোগ করুন।")
     else:
-        st.markdown(f"**মোট প্রোডাক্ট: {len(products)}টি**")
-        st.markdown("")
+        st.markdown(f"**মোট পণ্য: {len(products)}টি**")
         for pid, pname in products:
-            col1, col2 = st.columns([6, 1])
-            col1.markdown(f"<p style='padding-top:6px;color:#e0f0ea;font-size:1rem'>🍦 {pname}</p>",
-                          unsafe_allow_html=True)
-            with col2:
-                if st.button("🗑 মুছুন", key=f"del_{pid}"):
-                    delete_product(pid)
-                    st.rerun()
+            c1,c2 = st.columns([6,1])
+            c1.markdown(f"<p style='padding-top:6px;color:#e0f0ea;font-size:1rem'>🍦 {pname}</p>", unsafe_allow_html=True)
+            if c2.button("🗑", key=f"dp_{pid}"):
+                del_product(pid); st.rerun()
