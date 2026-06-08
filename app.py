@@ -48,30 +48,50 @@ def hash_pw(pw):
 
 def init_db():
     c = get_conn()
+
+    # Users table
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
         role TEXT DEFAULT 'user',
         display_name TEXT)""")
+
+    # Products table
     c.execute("""CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
+
+    # Stock table — create fresh if not exists
     c.execute("""CREATE TABLE IF NOT EXISTS stock (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entry_date TEXT NOT NULL, product_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL,
-        opening INTEGER DEFAULT 0, stock_in INTEGER DEFAULT 0,
-        delivery INTEGER DEFAULT 0, returned INTEGER DEFAULT 0,
-        retail INTEGER DEFAULT 0, damaged INTEGER DEFAULT 0,
+        entry_date TEXT NOT NULL,
+        product_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL DEFAULT 1,
+        opening INTEGER DEFAULT 0,
+        stock_in INTEGER DEFAULT 0,
+        delivery INTEGER DEFAULT 0,
+        returned INTEGER DEFAULT 0,
+        retail INTEGER DEFAULT 0,
+        damaged INTEGER DEFAULT 0,
         closing INTEGER DEFAULT 0,
-        UNIQUE(entry_date, product_id, user_id),
         FOREIGN KEY(product_id) REFERENCES products(id),
         FOREIGN KEY(user_id) REFERENCES users(id))""")
+
+    # Migration: পুরনো stock টেবিলে user_id না থাকলে যোগ করো
+    existing_cols = [row[1] for row in c.execute("PRAGMA table_info(stock)").fetchall()]
+    if "user_id" not in existing_cols:
+        c.execute("ALTER TABLE stock ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+
+    # Migration: পুরনো stock টেবিলে stock_in না থাকলে যোগ করো
+    if "stock_in" not in existing_cols:
+        c.execute("ALTER TABLE stock ADD COLUMN stock_in INTEGER DEFAULT 0")
+
     # Default admin
     try:
         c.execute("INSERT INTO users(username,password,role,display_name) VALUES(?,?,?,?)",
                   ("admin", hash_pw("admin123"), "admin", "মালিক"))
     except: pass
+
     c.commit(); c.close()
 
 init_db()
@@ -138,13 +158,11 @@ def get_row(entry_date, pid, user_id):
 def save_row(entry_date, pid, user_id, opening, stock_in, delivery, returned, retail, damaged):
     closing = opening + stock_in + returned - delivery - retail - damaged
     c = get_conn()
+    c.execute("DELETE FROM stock WHERE entry_date=? AND product_id=? AND user_id=?",
+              (entry_date, pid, user_id))
     c.execute("""INSERT INTO stock(entry_date,product_id,user_id,opening,stock_in,delivery,returned,retail,damaged,closing)
-        VALUES(?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(entry_date,product_id,user_id) DO UPDATE SET
-        opening=excluded.opening, stock_in=excluded.stock_in,
-        delivery=excluded.delivery, returned=excluded.returned,
-        retail=excluded.retail, damaged=excluded.damaged, closing=excluded.closing""",
-        (entry_date,pid,user_id,opening,stock_in,delivery,returned,retail,damaged,closing))
+        VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (entry_date, pid, user_id, opening, stock_in, delivery, returned, retail, damaged, closing))
     c.commit(); c.close()
     return closing
 
@@ -428,10 +446,10 @@ elif page == "⚙️ ইউজার ম্যানেজমেন্ট":
                 del_user(uid); st.rerun()
 
     st.markdown("---")
-    st.markdown("### পাসওয়ার্ড রিসেট")
+    st.markdown("### কর্মচারীর পাসওয়ার্ড রিসেট")
     users_list = [(uid, f"{dname} (@{uname})") for uid, uname, role, dname in users if uname != "admin"]
     if users_list:
-        sel = st.selectbox("ইউজার বেছে নিন", [u[0] for u in users_list],
+        sel = st.selectbox("কর্মচারী বেছে নিন", [u[0] for u in users_list],
                            format_func=lambda x: next(u[1] for u in users_list if u[0]==x))
         new_pass = st.text_input("নতুন পাসওয়ার্ড", type="password", key="reset_pw")
         if st.button("🔑 পাসওয়ার্ড রিসেট করুন"):
@@ -440,3 +458,24 @@ elif page == "⚙️ ইউজার ম্যানেজমেন্ট":
                 st.success("✅ পাসওয়ার্ড রিসেট হয়েছে!")
             else:
                 st.warning("নতুন পাসওয়ার্ড দিন।")
+    else:
+        st.info("কোনো কর্মচারী নেই।")
+
+    st.markdown("---")
+    st.markdown("### 🔐 আমার (Admin) পাসওয়ার্ড পরিবর্তন")
+    with st.form("admin_pw_form", clear_on_submit=True):
+        old_pw  = st.text_input("বর্তমান পাসওয়ার্ড", type="password")
+        new_pw1 = st.text_input("নতুন পাসওয়ার্ড", type="password")
+        new_pw2 = st.text_input("নতুন পাসওয়ার্ড আবার লিখুন", type="password")
+        if st.form_submit_button("✅ পাসওয়ার্ড পরিবর্তন করুন", use_container_width=True):
+            if not old_pw or not new_pw1 or not new_pw2:
+                st.warning("সব ঘর পূরণ করুন।")
+            elif new_pw1 != new_pw2:
+                st.error("নতুন পাসওয়ার্ড দুটো মিলছে না!")
+            else:
+                verified = login(user["username"], old_pw)
+                if verified:
+                    reset_password(user["id"], new_pw1)
+                    st.success("✅ পাসওয়ার্ড পরিবর্তন হয়েছে! পরের বার নতুন পাসওয়ার্ড দিয়ে লগিন করুন।")
+                else:
+                    st.error("বর্তমান পাসওয়ার্ড ভুল!")
