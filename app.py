@@ -28,11 +28,7 @@ input[type="number"], input[type="text"], input[type="password"] {
 hr { border-color: #1e3a52 !important; }
 p, label, .stText { color: #c8e6dc !important; }
 div[data-testid="stForm"] { background: #112236; border: 1px solid #1e3a52; border-radius: 10px; padding: 16px; }
-.login-box { max-width: 400px; margin: 80px auto; background: #112236;
-    border: 1px solid #1e3a52; border-radius: 16px; padding: 40px; }
 .role-badge-admin { background: #00e5b0; color: #0d1b2a; padding: 2px 10px;
-    border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
-.role-badge-user { background: #2a4a65; color: #a8d5c2; padding: 2px 10px;
     border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
 </style>
 """, unsafe_allow_html=True)
@@ -48,8 +44,9 @@ def hash_pw(pw):
 
 def init_db():
     c = get_conn()
+    c.execute("PRAGMA journal_mode=WAL")
 
-    # Users table
+    # Users
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
@@ -57,82 +54,54 @@ def init_db():
         role TEXT DEFAULT 'user',
         display_name TEXT)""")
 
-    # Products table
+    # Products
     c.execute("""CREATE TABLE IF NOT EXISTS products (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL)""")
 
-    # Check existing stock table columns
-    existing_cols = [row[1] for row in c.execute("PRAGMA table_info(stock)").fetchall()]
+    # Drop old stock table if it has wrong schema
+    old_cols = [r[1] for r in c.execute("PRAGMA table_info(stock)").fetchall()]
+    bad_schema = old_cols and ("user_id" not in old_cols or "stock_in" not in old_cols)
 
-    # Migration: পুরনো stock টেবিল থাকলে নতুন structure এ rebuild করো
-    if existing_cols:
-        # পুরনো constraint চেক — UNIQUE(entry_date,product_id) ছাড়া user_id আছে কিনা
-        needs_rebuild = "user_id" not in existing_cols or "stock_in" not in existing_cols
+    if bad_schema:
+        # Save old data
+        try:
+            old_rows = c.execute("SELECT * FROM stock").fetchall()
+            old_names = old_cols
+        except:
+            old_rows, old_names = [], []
+        c.execute("DROP TABLE stock")
 
-        if needs_rebuild:
-            # পুরনো ডেটা সেভ করো
-            try:
-                old_data = c.execute("SELECT * FROM stock").fetchall()
-                old_col_names = existing_cols
-            except:
-                old_data = []
-                old_col_names = []
-
-            # পুরনো টেবিল drop করো
-            c.execute("DROP TABLE IF EXISTS stock")
-
-            # নতুন টেবিল বানাও
-            c.execute("""CREATE TABLE stock (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                entry_date TEXT NOT NULL,
-                product_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL DEFAULT 1,
-                opening INTEGER DEFAULT 0,
-                stock_in INTEGER DEFAULT 0,
-                delivery INTEGER DEFAULT 0,
-                returned INTEGER DEFAULT 0,
-                retail INTEGER DEFAULT 0,
-                damaged INTEGER DEFAULT 0,
-                closing INTEGER DEFAULT 0,
-                FOREIGN KEY(product_id) REFERENCES products(id),
-                FOREIGN KEY(user_id) REFERENCES users(id))""")
-
-            # পুরনো ডেটা নতুন টেবিলে ঢালো (যতটুকু match করে)
-            for row in old_data:
-                try:
-                    row_dict = dict(zip(old_col_names, row))
-                    c.execute("""INSERT OR IGNORE INTO stock
-                        (entry_date, product_id, user_id, opening, stock_in,
-                         delivery, returned, retail, damaged, closing)
-                        VALUES(?,?,?,?,?,?,?,?,?,?)""", (
-                        row_dict.get("entry_date",""),
-                        row_dict.get("product_id",1),
-                        row_dict.get("user_id",1),
-                        row_dict.get("opening",0),
-                        row_dict.get("stock_in", row_dict.get("input_qty",0)),
-                        row_dict.get("delivery",0),
-                        row_dict.get("returned",0),
-                        row_dict.get("retail",0),
-                        row_dict.get("damaged",0),
-                        row_dict.get("closing",0),
-                    ))
-                except: pass
-    else:
-        # Fresh install — নতুন টেবিল বানাও
+    if bad_schema or not old_cols:
         c.execute("""CREATE TABLE IF NOT EXISTS stock (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            entry_date TEXT NOT NULL,
-            product_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL DEFAULT 1,
-            opening INTEGER DEFAULT 0,
-            stock_in INTEGER DEFAULT 0,
-            delivery INTEGER DEFAULT 0,
-            returned INTEGER DEFAULT 0,
-            retail INTEGER DEFAULT 0,
-            damaged INTEGER DEFAULT 0,
-            closing INTEGER DEFAULT 0,
-            FOREIGN KEY(product_id) REFERENCES products(id),
-            FOREIGN KEY(user_id) REFERENCES users(id))""")
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_date  TEXT    NOT NULL,
+            product_id  INTEGER NOT NULL,
+            user_id     INTEGER NOT NULL DEFAULT 1,
+            opening     INTEGER DEFAULT 0,
+            stock_in    INTEGER DEFAULT 0,
+            delivery    INTEGER DEFAULT 0,
+            returned    INTEGER DEFAULT 0,
+            retail      INTEGER DEFAULT 0,
+            damaged     INTEGER DEFAULT 0,
+            closing     INTEGER DEFAULT 0)""")
+
+        if bad_schema:
+            for row in old_rows:
+                try:
+                    d = dict(zip(old_names, row))
+                    closing = (d.get("opening",0) + d.get("stock_in", d.get("input_qty",0))
+                               + d.get("returned",0) - d.get("delivery",0)
+                               - d.get("retail",0) - d.get("damaged",0))
+                    c.execute("""INSERT INTO stock
+                        (entry_date,product_id,user_id,opening,stock_in,delivery,returned,retail,damaged,closing)
+                        VALUES(?,?,?,?,?,?,?,?,?,?)""", (
+                        d.get("entry_date",""), d.get("product_id",1),
+                        d.get("user_id",1), d.get("opening",0),
+                        d.get("stock_in", d.get("input_qty",0)),
+                        d.get("delivery",0), d.get("returned",0),
+                        d.get("retail",0), d.get("damaged",0), closing))
+                except: pass
 
     # Default admin
     try:
@@ -140,11 +109,12 @@ def init_db():
                   ("admin", hash_pw("admin123"), "admin", "মালিক"))
     except: pass
 
-    c.commit(); c.close()
+    c.commit()
+    c.close()
 
 init_db()
 
-# ── Auth functions ────────────────────────────────────────────────────────────
+# ── Auth ─────────────────────────────────────────────────────────────────────
 def login(username, password):
     c = get_conn()
     r = c.execute("SELECT id,username,role,display_name FROM users WHERE username=? AND password=?",
@@ -153,7 +123,7 @@ def login(username, password):
 
 def get_all_users():
     c = get_conn()
-    r = c.execute("SELECT id,username,role,display_name FROM users ORDER BY role DESC, display_name").fetchall()
+    r = c.execute("SELECT id,username,role,display_name FROM users ORDER BY role DESC,display_name").fetchall()
     c.close(); return r
 
 def add_user(username, password, role, display_name):
@@ -175,77 +145,79 @@ def reset_password(uid, new_pw):
     c.execute("UPDATE users SET password=? WHERE id=?", (hash_pw(new_pw), uid))
     c.commit(); c.close()
 
-# ── Stock functions ───────────────────────────────────────────────────────────
+# ── Products ─────────────────────────────────────────────────────────────────
 def get_products():
-    c = get_conn(); r = c.execute("SELECT id,name FROM products ORDER BY name").fetchall(); c.close(); return r
+    c = get_conn()
+    r = c.execute("SELECT id,name FROM products ORDER BY name").fetchall()
+    c.close(); return r
 
 def add_product(name):
     c = get_conn()
-    try: c.execute("INSERT INTO products(name) VALUES(?)",(name,)); c.commit(); return True
+    try: c.execute("INSERT INTO products(name) VALUES(?)", (name,)); c.commit(); return True
     except: return False
     finally: c.close()
 
 def del_product(pid):
     c = get_conn()
-    c.execute("DELETE FROM stock WHERE product_id=?",(pid,))
-    c.execute("DELETE FROM products WHERE id=?",(pid,))
+    c.execute("DELETE FROM stock WHERE product_id=?", (pid,))
+    c.execute("DELETE FROM products WHERE id=?", (pid,))
     c.commit(); c.close()
 
+# ── Stock ─────────────────────────────────────────────────────────────────────
 def get_last_closing(pid, before_date, user_id):
     c = get_conn()
-    r = c.execute("SELECT closing FROM stock WHERE product_id=? AND entry_date<? AND user_id=? ORDER BY entry_date DESC LIMIT 1",
-                  (pid, before_date, user_id)).fetchone()
+    r = c.execute("""SELECT closing FROM stock
+        WHERE product_id=? AND entry_date<? AND user_id=?
+        ORDER BY entry_date DESC LIMIT 1""", (pid, before_date, user_id)).fetchone()
     c.close(); return r[0] if r else 0
 
 def get_row(entry_date, pid, user_id):
     c = get_conn()
-    r = c.execute("SELECT opening,stock_in,delivery,returned,retail,damaged,closing FROM stock WHERE entry_date=? AND product_id=? AND user_id=?",
-                  (entry_date, pid, user_id)).fetchone()
+    r = c.execute("""SELECT opening,stock_in,delivery,returned,retail,damaged,closing
+        FROM stock WHERE entry_date=? AND product_id=? AND user_id=?""",
+        (entry_date, pid, user_id)).fetchone()
     c.close(); return r
 
 def save_row(entry_date, pid, user_id, opening, stock_in, delivery, returned, retail, damaged):
     closing = opening + stock_in + returned - delivery - retail - damaged
     c = get_conn()
-    c.execute("DELETE FROM stock WHERE entry_date=? AND product_id=? AND user_id=?",
-              (entry_date, pid, user_id))
-    c.execute("""INSERT INTO stock(entry_date,product_id,user_id,opening,stock_in,delivery,returned,retail,damaged,closing)
+    c.execute("""DELETE FROM stock
+        WHERE entry_date=? AND product_id=? AND user_id=?""",
+        (entry_date, pid, user_id))
+    c.execute("""INSERT INTO stock
+        (entry_date,product_id,user_id,opening,stock_in,delivery,returned,retail,damaged,closing)
         VALUES(?,?,?,?,?,?,?,?,?,?)""",
         (entry_date, pid, user_id, opening, stock_in, delivery, returned, retail, damaged, closing))
     c.commit(); c.close()
     return closing
 
-def get_admin_report(f, t):
+def get_combined_report(f, t):
     c = get_conn()
     rows = c.execute("""
-        SELECT s.entry_date, p.name as পণ্য, u.display_name as কর্মচারী,
-               s.opening, s.stock_in, s.delivery, s.returned,
-               s.retail, s.damaged, s.closing
+        SELECT s.entry_date, p.name,
+            SUM(s.opening), SUM(s.stock_in), SUM(s.delivery),
+            SUM(s.returned), SUM(s.retail), SUM(s.damaged), SUM(s.closing)
+        FROM stock s JOIN products p ON s.product_id=p.id
+        WHERE s.entry_date BETWEEN ? AND ?
+        GROUP BY s.entry_date, p.name
+        ORDER BY s.entry_date, p.name""", (f, t)).fetchall()
+    c.close(); return rows
+
+def get_employee_report(f, t):
+    c = get_conn()
+    rows = c.execute("""
+        SELECT s.entry_date, p.name, u.display_name,
+            s.opening, s.stock_in, s.delivery,
+            s.returned, s.retail, s.damaged, s.closing
         FROM stock s
         JOIN products p ON s.product_id=p.id
         JOIN users u ON s.user_id=u.id
         WHERE s.entry_date BETWEEN ? AND ?
-        ORDER BY s.entry_date, p.name, u.display_name
-    """, (f, t)).fetchall()
-    c.close()
-    return rows
-
-def get_combined_report(f, t):
-    """সব ইউজারের ডেটা মিলিয়ে পণ্যভিত্তিক সারসংক্ষেপ"""
-    c = get_conn()
-    rows = c.execute("""
-        SELECT s.entry_date, p.name,
-               SUM(s.opening), SUM(s.stock_in), SUM(s.delivery),
-               SUM(s.returned), SUM(s.retail), SUM(s.damaged), SUM(s.closing)
-        FROM stock s JOIN products p ON s.product_id=p.id
-        WHERE s.entry_date BETWEEN ? AND ?
-        GROUP BY s.entry_date, p.name
-        ORDER BY s.entry_date, p.name
-    """, (f, t)).fetchall()
-    c.close()
-    return rows
+        ORDER BY s.entry_date, p.name, u.display_name""", (f, t)).fetchall()
+    c.close(); return rows
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LOGIN
+# LOGIN PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -256,80 +228,71 @@ if st.session_state.user is None:
       <div style='font-size:4rem'>🍦</div>
       <h1 style='color:#00e5b0;margin:0'>মিল্কি আইস বার</h1>
       <p style='color:#7ecfb8'>স্টক ম্যানেজমেন্ট সিস্টেম</p>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
+    _, col, _ = st.columns([1,2,1])
+    with col:
         with st.form("login_form"):
             st.markdown("### 🔐 লগিন করুন")
-            username = st.text_input("ইউজারনেম", placeholder="username")
-            password = st.text_input("পাসওয়ার্ড", type="password", placeholder="password")
+            uname = st.text_input("ইউজারনেম", placeholder="username")
+            pw    = st.text_input("পাসওয়ার্ড", type="password", placeholder="password")
             if st.form_submit_button("লগিন করুন", use_container_width=True):
-                user = login(username, password)
-                if user:
-                    st.session_state.user = {"id":user[0],"username":user[1],"role":user[2],"name":user[3]}
+                u = login(uname, pw)
+                if u:
+                    st.session_state.user = {"id":u[0],"username":u[1],"role":u[2],"name":u[3]}
                     st.rerun()
                 else:
                     st.error("ইউজারনেম বা পাসওয়ার্ড ভুল!")
-        st.markdown("<small style='color:#4a7a6a'>ডিফল্ট Admin: username=admin, password=admin123</small>", unsafe_allow_html=True)
+        st.markdown("<small style='color:#4a7a6a'>ডিফল্ট: username=admin | password=admin123</small>",
+                    unsafe_allow_html=True)
     st.stop()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LOGGED IN
+# MAIN APP
 # ══════════════════════════════════════════════════════════════════════════════
-user = st.session_state.user
+user     = st.session_state.user
 is_admin = user["role"] == "admin"
 
-# Sidebar
-st.sidebar.markdown(f"## 🍦 মিল্কি আইস বার")
+# ── Sidebar ──────────────────────────────────────────────────────────────────
+st.sidebar.markdown("## 🍦 মিল্কি আইস বার")
 st.sidebar.markdown(f"**{user['name']}**")
 if is_admin:
-    st.sidebar.markdown(
-        "<span class='role-badge-admin'>মালিক ✓</span>",
-        unsafe_allow_html=True)
+    st.sidebar.markdown("<span class='role-badge-admin'>মালিক ✓</span>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
 if is_admin:
-    pages = ["📦 দৈনিক এন্ট্রি", "📊 সম্মিলিত রিপোর্ট", "👥 কর্মচারী রিপোর্ট", "🛒 পণ্য তালিকা", "⚙️ ইউজার ম্যানেজমেন্ট"]
+    pages = ["🏠 ড্যাশবোর্ড","📦 দৈনিক এন্ট্রি","📊 সম্মিলিত রিপোর্ট","👥 কর্মচারী রিপোর্ট","🛒 পণ্য তালিকা","⚙️ ইউজার ম্যানেজমেন্ট"]
 else:
-    pages = ["📦 দৈনিক এন্ট্রি", "📊 আমার রিপোর্ট"]
+    pages = ["📦 দৈনিক এন্ট্রি","📊 আমার রিপোর্ট"]
 
-page = st.sidebar.radio("মেনু", pages, label_visibility="collapsed")
+default_page = 0  # admin এর জন্য ড্যাশবোর্ড, কর্মচারীর জন্য এন্ট্রি
+page = st.sidebar.radio("মেনু", pages, index=default_page, label_visibility="collapsed")
 st.sidebar.markdown("---")
 if st.sidebar.button("🚪 লগআউট"):
     st.session_state.user = None
     st.rerun()
 
-# ══ PAGE: দৈনিক এন্ট্রি (সবার জন্য) ══════════════════════════════════════════
-if page == "📦 দৈনিক এন্ট্রি":
-    st.title(f"📦 দৈনিক স্টক এন্ট্রি — {user['name']}")
-
-    col1, _ = st.columns([2,5])
-    with col1:
-        sel_date = st.date_input("তারিখ", value=date.today())
-    edate = str(sel_date)
-
+# ── Helper: entry table ───────────────────────────────────────────────────────
+def draw_entry_table(edate, uid):
     products = get_products()
     if not products:
         st.warning("⚠️ মালিক এখনো পণ্য যোগ করেননি।")
         st.stop()
 
-    # Header
     W = [2.2, 1, 1, 1, 1, 1, 1, 1.2]
     headers = ["পণ্য","ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"]
     hc = st.columns(W)
-    for i, h in enumerate(headers):
+    for i,h in enumerate(headers):
         hc[i].markdown(
             f"<div style='background:#0a2540;color:#00e5b0;font-weight:700;"
             f"font-size:0.8rem;text-align:center;padding:6px 2px;"
-            f"border:1px solid #1e3a52;border-radius:4px;'>{h}</div>",
+            f"border:1px solid #1e3a52;border-radius:4px'>{h}</div>",
             unsafe_allow_html=True)
 
-    entry_data = {}
-    for idx, (pid, pname) in enumerate(products):
-        r = get_row(edate, pid, user["id"])
-        lc = get_last_closing(pid, edate, user["id"])
+    data = {}
+    for idx,(pid,pname) in enumerate(products):
+        r  = get_row(edate, pid, uid)
+        lc = get_last_closing(pid, edate, uid)
         op  = r[0] if r else lc
         si  = r[1] if r else 0
         de  = r[2] if r else 0
@@ -337,41 +300,131 @@ if page == "📦 দৈনিক এন্ট্রি":
         rt  = r[4] if r else 0
         da  = r[5] if r else 0
 
-        bg = "#112236" if idx % 2 == 0 else "#0d1b2a"
+        bg = "#112236" if idx%2==0 else "#0d1b2a"
         rc = st.columns(W)
         rc[0].markdown(
             f"<div style='background:{bg};color:#e0f0ea;font-weight:600;"
-            f"padding:8px 8px;border:1px solid #1e3a52;border-radius:4px;"
-            f"font-size:0.9rem;'>{pname}</div>", unsafe_allow_html=True)
+            f"padding:8px;border:1px solid #1e3a52;border-radius:4px;"
+            f"font-size:0.9rem'>{pname}</div>", unsafe_allow_html=True)
 
-        opening  = rc[1].number_input("", value=op,  min_value=0, key=f"op_{pid}", label_visibility="collapsed")
-        stock_in = rc[2].number_input("", value=si,  min_value=0, key=f"si_{pid}", label_visibility="collapsed")
-        delivery = rc[3].number_input("", value=de,  min_value=0, key=f"de_{pid}", label_visibility="collapsed")
-        returned = rc[4].number_input("", value=re_, min_value=0, key=f"re_{pid}", label_visibility="collapsed")
-        retail   = rc[5].number_input("", value=rt,  min_value=0, key=f"rt_{pid}", label_visibility="collapsed")
-        damaged  = rc[6].number_input("", value=da,  min_value=0, key=f"da_{pid}", label_visibility="collapsed")
+        opening  = rc[1].number_input("", value=op,  min_value=0, key=f"op_{pid}_{uid}", label_visibility="collapsed")
+        stock_in = rc[2].number_input("", value=si,  min_value=0, key=f"si_{pid}_{uid}", label_visibility="collapsed")
+        delivery = rc[3].number_input("", value=de,  min_value=0, key=f"de_{pid}_{uid}", label_visibility="collapsed")
+        returned = rc[4].number_input("", value=re_, min_value=0, key=f"re_{pid}_{uid}", label_visibility="collapsed")
+        retail   = rc[5].number_input("", value=rt,  min_value=0, key=f"rt_{pid}_{uid}", label_visibility="collapsed")
+        damaged  = rc[6].number_input("", value=da,  min_value=0, key=f"da_{pid}_{uid}", label_visibility="collapsed")
 
         closing = opening + stock_in + returned - delivery - retail - damaged
-        cl_color = "#00e5b0" if closing >= 0 else "#e05c5c"
+        clr = "#00e5b0" if closing >= 0 else "#e05c5c"
         rc[7].markdown(
-            f"<div style='background:{bg};color:{cl_color};font-weight:700;"
+            f"<div style='background:{bg};color:{clr};font-weight:700;"
             f"font-size:1.05rem;text-align:center;padding:8px 4px;"
-            f"border:1px solid #1e3a52;border-radius:4px;'>{closing}</div>",
+            f"border:1px solid #1e3a52;border-radius:4px'>{closing}</div>",
             unsafe_allow_html=True)
 
-        entry_data[pid] = (opening, stock_in, delivery, returned, retail, damaged)
+        data[pid] = (opening, stock_in, delivery, returned, retail, damaged)
+    return data
 
+# ══ ড্যাশবোর্ড (Admin) ═══════════════════════════════════════════════════════
+if page == "🏠 ড্যাশবোর্ড":
+    st.title(f"🏠 ড্যাশবোর্ড — আজকের রিপোর্ট")
+
+    today = str(date.today())
+    st.markdown(f"<p style='color:#7ecfb8'>📅 তারিখ: {today}</p>", unsafe_allow_html=True)
+    st.markdown("---")
+
+    # আজকের সম্মিলিত ডেটা
+    rows = get_combined_report(today, today)
+
+    if not rows:
+        st.info("আজকে এখনো কোনো এন্ট্রি হয়নি।")
+    else:
+        df_today = pd.DataFrame(rows, columns=["তারিখ","পণ্য","ওপেনিং","স্টক ইন",
+                                                "ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
+
+        # Summary metrics
+        m1,m2,m3,m4,m5,m6 = st.columns(6)
+        m1.metric("📥 স্টক ইন",   int(df_today["স্টক ইন"].sum()))
+        m2.metric("🚚 ডেলিভারি",  int(df_today["ডেলিভারি"].sum()))
+        m3.metric("↩️ রিটার্ন",   int(df_today["রিটার্ন"].sum()))
+        m4.metric("🛒 খুচরা",     int(df_today["খুচরা"].sum()))
+        m5.metric("❌ নষ্ট",      int(df_today["নষ্ট"].sum()))
+        m6.metric("📦 ক্লোজিং",   int(df_today["ক্লোজিং"].sum()))
+
+        st.markdown("---")
+        st.markdown("### পণ্যভিত্তিক আজকের স্টক")
+
+        # Table header
+        W = [2.2, 1, 1, 1, 1, 1, 1, 1.2]
+        headers = ["পণ্য","ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"]
+        hc = st.columns(W)
+        for i,h in enumerate(headers):
+            hc[i].markdown(
+                f"<div style='background:#0a2540;color:#00e5b0;font-weight:700;"
+                f"font-size:0.8rem;text-align:center;padding:6px 2px;"
+                f"border:1px solid #1e3a52;border-radius:4px'>{h}</div>",
+                unsafe_allow_html=True)
+
+        for idx, row in df_today.iterrows():
+            bg = "#112236" if idx%2==0 else "#0d1b2a"
+            rc = st.columns(W)
+            rc[0].markdown(
+                f"<div style='background:{bg};color:#e0f0ea;font-weight:600;"
+                f"padding:8px;border:1px solid #1e3a52;border-radius:4px;"
+                f"font-size:0.9rem'>{row['পণ্য']}</div>", unsafe_allow_html=True)
+            for ci, col_name in enumerate(["ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট"]):
+                rc[ci+1].markdown(
+                    f"<div style='background:{bg};color:#c8e6dc;text-align:center;"
+                    f"padding:8px 4px;border:1px solid #1e3a52;border-radius:4px'>{int(row[col_name])}</div>",
+                    unsafe_allow_html=True)
+            cl = int(row["ক্লোজিং"])
+            clr = "#00e5b0" if cl >= 0 else "#e05c5c"
+            rc[7].markdown(
+                f"<div style='background:{bg};color:{clr};font-weight:700;"
+                f"font-size:1.05rem;text-align:center;padding:8px 4px;"
+                f"border:1px solid #1e3a52;border-radius:4px'>{cl}</div>",
+                unsafe_allow_html=True)
+
+    # কর্মচারী এন্ট্রি স্ট্যাটাস
+    st.markdown("---")
+    st.markdown("### কর্মচারী এন্ট্রি স্ট্যাটাস")
+    all_users = get_all_users()
+    workers = [(uid,un,dn) for uid,un,r,dn in all_users if r=="user"]
+    if workers:
+        c = get_conn()
+        for uid,un,dn in workers:
+            has_entry = c.execute(
+                "SELECT COUNT(*) FROM stock WHERE entry_date=? AND user_id=?",
+                (today, uid)).fetchone()[0]
+            status = "✅ এন্ট্রি দিয়েছে" if has_entry else "⏳ এখনো দেয়নি"
+            color  = "#00e5b0" if has_entry else "#e0a040"
+            c1,c2 = st.columns([3,2])
+            c1.markdown(f"<p style='padding-top:4px;color:#e0f0ea'>👤 {dn}</p>", unsafe_allow_html=True)
+            c2.markdown(f"<p style='padding-top:4px;color:{color}'>{status}</p>", unsafe_allow_html=True)
+        c.close()
+    else:
+        st.info("কোনো কর্মচারী নেই।")
+
+# ══ দৈনিক এন্ট্রি ════════════════════════════════════════════════════════════
+elif page == "📦 দৈনিক এন্ট্রি":
+    st.title(f"📦 দৈনিক স্টক এন্ট্রি — {user['name']}")
+    c1,_ = st.columns([2,5])
+    with c1:
+        sel_date = st.date_input("তারিখ", value=date.today())
+    edate = str(sel_date)
+
+    data = draw_entry_table(edate, user["id"])
     st.markdown("")
     if st.button("💾  সেভ করুন"):
-        for pid, (op,si,de,re_,rt,da) in entry_data.items():
+        for pid,(op,si,de,re_,rt,da) in data.items():
             save_row(edate, pid, user["id"], op, si, de, re_, rt, da)
         st.success(f"✅ {edate} তারিখের ডেটা সেভ হয়েছে!")
         st.balloons()
 
-# ══ PAGE: সম্মিলিত রিপোর্ট (Admin) ══════════════════════════════════════════
+# ══ সম্মিলিত রিপোর্ট ═════════════════════════════════════════════════════════
 elif page == "📊 সম্মিলিত রিপোর্ট":
     st.title("📊 সম্মিলিত স্টক রিপোর্ট")
-    c1,c2 = st.columns([2,2])
+    c1,c2 = st.columns(2)
     with c1: fd = st.date_input("শুরু", value=date.today()-timedelta(days=6))
     with c2: td = st.date_input("শেষ",  value=date.today())
 
@@ -379,7 +432,8 @@ elif page == "📊 সম্মিলিত রিপোর্ট":
     if not rows:
         st.info("এই সময়ের কোনো ডেটা নেই।")
     else:
-        df = pd.DataFrame(rows, columns=["তারিখ","পণ্য","ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
+        df = pd.DataFrame(rows, columns=["তারিখ","পণ্য","ওপেনিং","স্টক ইন",
+                                          "ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
         m1,m2,m3,m4,m5 = st.columns(5)
         m1.metric("মোট স্টক ইন",  int(df["স্টক ইন"].sum()))
         m2.metric("মোট ডেলিভারি", int(df["ডেলিভারি"].sum()))
@@ -389,35 +443,35 @@ elif page == "📊 সম্মিলিত রিপোর্ট":
         st.markdown("---")
         st.dataframe(df, use_container_width=True, hide_index=True)
         csv = df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ CSV ডাউনলোড", data=csv, file_name=f"combined_{fd}_{td}.csv", mime="text/csv")
+        st.download_button("⬇️ CSV ডাউনলোড", data=csv,
+            file_name=f"combined_{fd}_{td}.csv", mime="text/csv")
 
-# ══ PAGE: কর্মচারী রিপোর্ট (Admin) ══════════════════════════════════════════
+# ══ কর্মচারী রিপোর্ট ══════════════════════════════════════════════════════════
 elif page == "👥 কর্মচারী রিপোর্ট":
     st.title("👥 কর্মচারী ভিত্তিক রিপোর্ট")
-    c1,c2 = st.columns([2,2])
+    c1,c2 = st.columns(2)
     with c1: fd = st.date_input("শুরু", value=date.today()-timedelta(days=6))
     with c2: td = st.date_input("শেষ",  value=date.today())
 
-    rows = get_admin_report(str(fd), str(td))
+    rows = get_employee_report(str(fd), str(td))
     if not rows:
         st.info("এই সময়ের কোনো ডেটা নেই।")
     else:
-        df = pd.DataFrame(rows, columns=["তারিখ","পণ্য","কর্মচারী","ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
-
-        # Filter by employee
-        employees = ["সবাই"] + sorted(df["কর্মচারী"].unique().tolist())
-        sel_emp = st.selectbox("কর্মচারী বেছে নিন", employees)
-        if sel_emp != "সবাই":
-            df = df[df["কর্মচারী"] == sel_emp]
-
+        df = pd.DataFrame(rows, columns=["তারিখ","পণ্য","কর্মচারী","ওপেনিং",
+                                          "স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
+        emps = ["সবাই"] + sorted(df["কর্মচারী"].unique().tolist())
+        sel  = st.selectbox("কর্মচারী বেছে নিন", emps)
+        if sel != "সবাই":
+            df = df[df["কর্মচারী"] == sel]
         st.dataframe(df, use_container_width=True, hide_index=True)
         csv = df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("⬇️ CSV ডাউনলোড", data=csv, file_name=f"employee_report.csv", mime="text/csv")
+        st.download_button("⬇️ CSV ডাউনলোড", data=csv,
+            file_name=f"employee_report.csv", mime="text/csv")
 
-# ══ PAGE: আমার রিপোর্ট (কর্মচারী) ══════════════════════════════════════════
+# ══ আমার রিপোর্ট (কর্মচারী) ══════════════════════════════════════════════════
 elif page == "📊 আমার রিপোর্ট":
     st.title(f"📊 আমার রিপোর্ট — {user['name']}")
-    c1,c2 = st.columns([2,2])
+    c1,c2 = st.columns(2)
     with c1: fd = st.date_input("শুরু", value=date.today()-timedelta(days=6))
     with c2: td = st.date_input("শেষ",  value=date.today())
 
@@ -427,86 +481,78 @@ elif page == "📊 আমার রিপোর্ট":
                s.delivery, s.returned, s.retail, s.damaged, s.closing
         FROM stock s JOIN products p ON s.product_id=p.id
         WHERE s.entry_date BETWEEN ? AND ? AND s.user_id=?
-        ORDER BY s.entry_date, p.name
-    """, (str(fd), str(td), user["id"])).fetchall()
+        ORDER BY s.entry_date, p.name""",
+        (str(fd), str(td), user["id"])).fetchall()
     c.close()
-
     if not rows:
         st.info("এই সময়ের কোনো ডেটা নেই।")
     else:
-        df = pd.DataFrame(rows, columns=["তারিখ","পণ্য","ওপেনিং","স্টক ইন","ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
+        df = pd.DataFrame(rows, columns=["তারিখ","পণ্য","ওপেনিং","স্টক ইন",
+                                          "ডেলিভারি","রিটার্ন","খুচরা","নষ্ট","ক্লোজিং"])
         st.dataframe(df, use_container_width=True, hide_index=True)
 
-# ══ PAGE: পণ্য তালিকা (Admin only) ══════════════════════════════════════════
+# ══ পণ্য তালিকা ═══════════════════════════════════════════════════════════════
 elif page == "🛒 পণ্য তালিকা":
     st.title("🛒 পণ্য তালিকা")
     with st.form("prod_form", clear_on_submit=True):
         c1,c2 = st.columns([4,1])
-        new_prod = c1.text_input("নতুন পণ্যের নাম", placeholder="যেমন: চকোলেট কাপ")
+        np_ = c1.text_input("নতুন পণ্যের নাম", placeholder="যেমন: চকোলেট কাপ")
         if c2.form_submit_button("+ যোগ", use_container_width=True):
-            if new_prod.strip():
-                if add_product(new_prod.strip()): st.rerun()
+            if np_.strip():
+                if add_product(np_.strip()): st.rerun()
                 else: st.error("এই নাম আগেই আছে!")
             else: st.warning("নাম লিখুন।")
     st.markdown("---")
-    products = get_products()
-    if not products:
-        st.info("এখনো কোনো পণ্য নেই।")
-    else:
-        for pid, pname in products:
-            c1,c2 = st.columns([6,1])
-            c1.markdown(f"<p style='padding-top:6px;color:#e0f0ea'>🍦 {pname}</p>", unsafe_allow_html=True)
-            if c2.button("🗑", key=f"dp_{pid}"):
-                del_product(pid); st.rerun()
+    for pid,pname in get_products():
+        c1,c2 = st.columns([6,1])
+        c1.markdown(f"<p style='padding-top:6px;color:#e0f0ea'>🍦 {pname}</p>", unsafe_allow_html=True)
+        if c2.button("🗑", key=f"dp_{pid}"):
+            del_product(pid); st.rerun()
 
-# ══ PAGE: ইউজার ম্যানেজমেন্ট (Admin only) ═══════════════════════════════════
+# ══ ইউজার ম্যানেজমেন্ট ════════════════════════════════════════════════════════
 elif page == "⚙️ ইউজার ম্যানেজমেন্ট":
     st.title("⚙️ ইউজার ম্যানেজমেন্ট")
 
     with st.form("user_form", clear_on_submit=True):
         st.markdown("### নতুন ইউজার যোগ করুন")
         c1,c2 = st.columns(2)
-        new_name     = c1.text_input("নাম (বাংলায়)", placeholder="যেমন: সাজ্জাদ")
-        new_username = c2.text_input("ইউজারনেম", placeholder="যেমন: sajjad")
+        nn = c1.text_input("নাম (বাংলায়)", placeholder="যেমন: সাজ্জাদ")
+        nu = c2.text_input("ইউজারনেম",     placeholder="যেমন: sajjad")
         c3,c4 = st.columns(2)
-        new_pw   = c3.text_input("পাসওয়ার্ড", type="password")
-        new_role = c4.selectbox("ভূমিকা", ["user","admin"], format_func=lambda x: "কর্মচারী" if x=="user" else "মালিক")
+        np2  = c3.text_input("পাসওয়ার্ড", type="password")
+        role = c4.selectbox("ভূমিকা", ["user","admin"],
+                            format_func=lambda x: "কর্মচারী" if x=="user" else "মালিক")
         if st.form_submit_button("✅ ইউজার যোগ করুন", use_container_width=True):
-            if new_name and new_username and new_pw:
-                if add_user(new_username, new_pw, new_role, new_name):
-                    st.success(f"✅ '{new_name}' যোগ হয়েছে!")
+            if nn and nu and np2:
+                if add_user(nu, np2, role, nn):
+                    st.success(f"✅ '{nn}' যোগ হয়েছে! লগিন: {nu} / {np2}")
                     st.rerun()
-                else:
-                    st.error("এই ইউজারনেম আগেই আছে!")
-            else:
-                st.warning("সব তথ্য পূরণ করুন।")
+                else: st.error("এই ইউজারনেম আগেই আছে!")
+            else: st.warning("সব তথ্য পূরণ করুন।")
 
     st.markdown("---")
     st.markdown("### বর্তমান ইউজার তালিকা")
-    users = get_all_users()
-    for uid, uname, role, dname in users:
+    for uid,uname,urole,dname in get_all_users():
         c1,c2,c3,c4 = st.columns([3,2,2,1])
         c1.markdown(f"<p style='padding-top:6px;color:#e0f0ea;font-weight:600'>{dname}</p>", unsafe_allow_html=True)
         c2.markdown(f"<p style='padding-top:6px;color:#7ecfb8'>@{uname}</p>", unsafe_allow_html=True)
-        badge = "মালিক" if role=="admin" else "কর্মচারী"
-        c3.markdown(f"<span class='role-badge-{role}' style='display:inline-block;margin-top:8px'>{badge}</span>", unsafe_allow_html=True)
+        badge = "মালিক" if urole=="admin" else "কর্মচারী"
+        c3.markdown(f"<p style='padding-top:6px;color:#a8d5c2'>{badge}</p>", unsafe_allow_html=True)
         if uname != "admin":
             if c4.button("🗑", key=f"du_{uid}"):
                 del_user(uid); st.rerun()
 
     st.markdown("---")
     st.markdown("### কর্মচারীর পাসওয়ার্ড রিসেট")
-    users_list = [(uid, f"{dname} (@{uname})") for uid, uname, role, dname in users if uname != "admin"]
-    if users_list:
-        sel = st.selectbox("কর্মচারী বেছে নিন", [u[0] for u in users_list],
-                           format_func=lambda x: next(u[1] for u in users_list if u[0]==x))
-        new_pass = st.text_input("নতুন পাসওয়ার্ড", type="password", key="reset_pw")
+    all_users = get_all_users()
+    others = [(uid,f"{dn} (@{un})") for uid,un,r,dn in all_users if un != "admin"]
+    if others:
+        sel = st.selectbox("কর্মচারী বেছে নিন", [u[0] for u in others],
+                           format_func=lambda x: next(u[1] for u in others if u[0]==x))
+        rp = st.text_input("নতুন পাসওয়ার্ড", type="password", key="reset_pw")
         if st.button("🔑 পাসওয়ার্ড রিসেট করুন"):
-            if new_pass:
-                reset_password(sel, new_pass)
-                st.success("✅ পাসওয়ার্ড রিসেট হয়েছে!")
-            else:
-                st.warning("নতুন পাসওয়ার্ড দিন।")
+            if rp: reset_password(sel, rp); st.success("✅ রিসেট হয়েছে!")
+            else: st.warning("পাসওয়ার্ড দিন।")
     else:
         st.info("কোনো কর্মচারী নেই।")
 
@@ -521,10 +567,8 @@ elif page == "⚙️ ইউজার ম্যানেজমেন্ট":
                 st.warning("সব ঘর পূরণ করুন।")
             elif new_pw1 != new_pw2:
                 st.error("নতুন পাসওয়ার্ড দুটো মিলছে না!")
+            elif not login(user["username"], old_pw):
+                st.error("বর্তমান পাসওয়ার্ড ভুল!")
             else:
-                verified = login(user["username"], old_pw)
-                if verified:
-                    reset_password(user["id"], new_pw1)
-                    st.success("✅ পাসওয়ার্ড পরিবর্তন হয়েছে! পরের বার নতুন পাসওয়ার্ড দিয়ে লগিন করুন।")
-                else:
-                    st.error("বর্তমান পাসওয়ার্ড ভুল!")
+                reset_password(user["id"], new_pw1)
+                st.success("✅ পাসওয়ার্ড পরিবর্তন হয়েছে!")
