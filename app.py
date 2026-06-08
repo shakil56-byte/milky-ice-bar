@@ -61,30 +61,78 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS products (
         id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL)""")
 
-    # Stock table — create fresh if not exists
-    c.execute("""CREATE TABLE IF NOT EXISTS stock (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entry_date TEXT NOT NULL,
-        product_id INTEGER NOT NULL,
-        user_id INTEGER NOT NULL DEFAULT 1,
-        opening INTEGER DEFAULT 0,
-        stock_in INTEGER DEFAULT 0,
-        delivery INTEGER DEFAULT 0,
-        returned INTEGER DEFAULT 0,
-        retail INTEGER DEFAULT 0,
-        damaged INTEGER DEFAULT 0,
-        closing INTEGER DEFAULT 0,
-        FOREIGN KEY(product_id) REFERENCES products(id),
-        FOREIGN KEY(user_id) REFERENCES users(id))""")
-
-    # Migration: পুরনো stock টেবিলে user_id না থাকলে যোগ করো
+    # Check existing stock table columns
     existing_cols = [row[1] for row in c.execute("PRAGMA table_info(stock)").fetchall()]
-    if "user_id" not in existing_cols:
-        c.execute("ALTER TABLE stock ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
 
-    # Migration: পুরনো stock টেবিলে stock_in না থাকলে যোগ করো
-    if "stock_in" not in existing_cols:
-        c.execute("ALTER TABLE stock ADD COLUMN stock_in INTEGER DEFAULT 0")
+    # Migration: পুরনো stock টেবিল থাকলে নতুন structure এ rebuild করো
+    if existing_cols:
+        # পুরনো constraint চেক — UNIQUE(entry_date,product_id) ছাড়া user_id আছে কিনা
+        needs_rebuild = "user_id" not in existing_cols or "stock_in" not in existing_cols
+
+        if needs_rebuild:
+            # পুরনো ডেটা সেভ করো
+            try:
+                old_data = c.execute("SELECT * FROM stock").fetchall()
+                old_col_names = existing_cols
+            except:
+                old_data = []
+                old_col_names = []
+
+            # পুরনো টেবিল drop করো
+            c.execute("DROP TABLE IF EXISTS stock")
+
+            # নতুন টেবিল বানাও
+            c.execute("""CREATE TABLE stock (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_date TEXT NOT NULL,
+                product_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                opening INTEGER DEFAULT 0,
+                stock_in INTEGER DEFAULT 0,
+                delivery INTEGER DEFAULT 0,
+                returned INTEGER DEFAULT 0,
+                retail INTEGER DEFAULT 0,
+                damaged INTEGER DEFAULT 0,
+                closing INTEGER DEFAULT 0,
+                FOREIGN KEY(product_id) REFERENCES products(id),
+                FOREIGN KEY(user_id) REFERENCES users(id))""")
+
+            # পুরনো ডেটা নতুন টেবিলে ঢালো (যতটুকু match করে)
+            for row in old_data:
+                try:
+                    row_dict = dict(zip(old_col_names, row))
+                    c.execute("""INSERT OR IGNORE INTO stock
+                        (entry_date, product_id, user_id, opening, stock_in,
+                         delivery, returned, retail, damaged, closing)
+                        VALUES(?,?,?,?,?,?,?,?,?,?)""", (
+                        row_dict.get("entry_date",""),
+                        row_dict.get("product_id",1),
+                        row_dict.get("user_id",1),
+                        row_dict.get("opening",0),
+                        row_dict.get("stock_in", row_dict.get("input_qty",0)),
+                        row_dict.get("delivery",0),
+                        row_dict.get("returned",0),
+                        row_dict.get("retail",0),
+                        row_dict.get("damaged",0),
+                        row_dict.get("closing",0),
+                    ))
+                except: pass
+    else:
+        # Fresh install — নতুন টেবিল বানাও
+        c.execute("""CREATE TABLE IF NOT EXISTS stock (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_date TEXT NOT NULL,
+            product_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL DEFAULT 1,
+            opening INTEGER DEFAULT 0,
+            stock_in INTEGER DEFAULT 0,
+            delivery INTEGER DEFAULT 0,
+            returned INTEGER DEFAULT 0,
+            retail INTEGER DEFAULT 0,
+            damaged INTEGER DEFAULT 0,
+            closing INTEGER DEFAULT 0,
+            FOREIGN KEY(product_id) REFERENCES products(id),
+            FOREIGN KEY(user_id) REFERENCES users(id))""")
 
     # Default admin
     try:
