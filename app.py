@@ -236,9 +236,10 @@ is_admin = user["role"] == "admin"
 # Sidebar
 st.sidebar.markdown(f"## 🍦 মিল্কি আইস বার")
 st.sidebar.markdown(f"**{user['name']}**")
-st.sidebar.markdown(
-    f"<span class='role-badge-{'admin' if is_admin else 'user'}'>{'মালিক ✓' if is_admin else 'কর্মচারী'}</span>",
-    unsafe_allow_html=True)
+if is_admin:
+    st.sidebar.markdown(
+        "<span class='role-badge-admin'>মালিক ✓</span>",
+        unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
 if is_admin:
